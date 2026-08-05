@@ -1,0 +1,35 @@
+name: Hourly brief tick
+
+# Vercel Hobby allows only one cron per day, but /api/cron/hourly must run
+# every hour: each run serves whichever timezones have just reached their
+# users' send hour (lib/../cron/hourly/route.ts skips everyone else).
+# The endpoint is idempotent per (user, day), so extra runs are harmless.
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch: # lets you trigger a run by hand from the Actions tab
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call /api/cron/hourly
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          status=$(curl -sS --max-time 120 \
+            -o /tmp/response.json -w '%{http_code}' \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            https://www.fndrbrief.com/api/cron/hourly)
+
+          # This repo is public, so Actions logs are public. A 200 body lists
+          # user IDs — never echo it. Error bodies are generic, so they're safe.
+          if [ "$status" = "200" ]; then
+            echo "ok"
+          else
+            echo "::error::cron endpoint returned $status"
+            cat /tmp/response.json
+            exit 1
+          fi
