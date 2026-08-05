@@ -36,16 +36,21 @@ The LLM never originates a number. If a cause isn't in the data, the brief says
 2. Run `supabase/migrations/0001_init.sql` in the SQL editor.
 3. Auth → Providers → enable **Email**. No config needed; this powers the
    magic-link sign-in.
-4. Auth → URL Configuration → Site URL = `http://localhost:3000`, and add
-   `http://localhost:3000/auth/callback` to Redirect URLs.
+4. Auth → URL Configuration:
+   - **Site URL** — a single value, set it to **production**
+     (`https://YOURAPP`). Magic-link emails resolve against this, so pointing
+     it at localhost would send every production sign-in link to localhost.
+   - **Redirect URLs** — an allowlist, add **both**:
+     `https://YOURAPP/auth/callback` and `http://localhost:3000/auth/callback`.
 5. Settings → API → copy the project URL, `anon` key, and `service_role` key
    into `.env.local`.
 
-### 2. GitHub OAuth Apps (you need two)
+### 2. GitHub OAuth Apps (two, plus one for local dev)
 
 Two, because a GitHub OAuth App has only **one** Authorization callback URL,
 and these two flows land on different hosts — sign-in goes to Supabase, the
-data integration goes to your own server.
+data integration goes to your own server. That one-callback limit is also why
+the integration app needs a local-dev twin (see App B).
 
 **First: create a GitHub Organization to own them.**
 
@@ -85,9 +90,12 @@ Owner dropdown — pick the org, not yourself).
    Keep the tab open.
 2. GitHub → Settings → Developer settings → OAuth Apps → **New OAuth App**
    - Application name: `Founder Brief — Sign in`
-   - Homepage URL: `http://localhost:3000`
+   - Homepage URL: `https://YOURAPP`
    - Authorization callback URL: **paste the Supabase URL from step 1**
    - Register application
+
+   This app needs no dev/prod split: the callback points at Supabase, which is
+   the same host in both environments.
 3. Copy the **Client ID**, then **Generate a new client secret** and copy it.
 4. Back in the Supabase GitHub tab: paste both, leave **Allow users without an
    email** OFF (briefs are delivered by email), toggle **GitHub enabled** ON,
@@ -98,19 +106,26 @@ Owner dropdown — pick the org, not yourself).
 1. GitHub → Developer settings → OAuth Apps → **New OAuth App** (a second,
    separate app)
    - Application name: `Founder Brief — GitHub data`
-   - Homepage URL: `http://localhost:3000`
+   - Homepage URL: `https://YOURAPP`
    - Authorization callback URL:
-     `http://localhost:3000/api/integrations/github/callback`
+     `https://YOURAPP/api/integrations/github/callback`
    - Register application
 2. Copy the Client ID and generate a secret.
 3. Put them in `.env.local` as `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`.
+
+Unlike App A, this callback points at *your* server, so dev and prod differ.
+Since one OAuth App allows only one callback URL, register a **third** app for
+local development — identical, but with callback
+`http://localhost:3000/api/integrations/github/callback` — and use its
+credentials in your local `.env.local`, keeping the production pair for Vercel.
 
 These live in `.env.local` rather than Supabase because your Next.js server
 runs this handshake itself (`app/api/integrations/github/authorize/route.ts`),
 requesting the `repo read:user` scope.
 
-> When you deploy, App B's callback URL must be changed to your production URL
-> (or register a separate app for prod) — one app, one callback.
+Replace `YOURAPP` throughout with your real production domain once you know it
+(Vercel gives you one at first deploy); the callback URLs can be edited on an
+existing OAuth App at any time without invalidating its Client ID or Secret.
 
 ### 3. Environment
 
