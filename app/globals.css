@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --paper: 250 250 248;   /* #FAFAF8 */
+  --ink: 25 28 31;        /* #191C1F */
+  --muted: 110 115 120;   /* #6E7378 */
+  --faint: 155 160 166;   /* #9BA0A6 */
+  --line: 230 228 223;    /* #E6E4DF */
+  --ledger: 30 110 80;    /* #1E6E50 */
+  --oxide: 168 67 44;     /* #A8432C */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: 15 17 19;    /* #0F1113 */
+    --ink: 233 231 226;   /* #E9E7E2 */
+    --muted: 139 144 150; /* #8B9096 */
+    --faint: 100 105 111;
+    --line: 38 41 45;     /* #26292D */
+    --ledger: 84 178 138; /* #54B28A */
+    --oxide: 217 111 82;  /* #D96F52 */
+  }
+}
+
+body {
+  background: rgb(var(--paper));
+  color: rgb(var(--ink));
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgb(var(--ink) / 0.9);
+  color: rgb(var(--paper));
+}
+
+/* ── Section eyebrow: mono, tracked, small caps ─────────────────────── */
+.eyebrow {
+  @apply font-mono text-[11px] uppercase text-muted;
+  letter-spacing: 0.14em;
+}
+
+/* ── Ledger row: label … dotted leader … tabular value ──────────────── */
+.ledger-row {
+  @apply flex items-baseline gap-3 py-[9px];
+}
+.ledger-leader {
+  @apply flex-1 self-end mb-[5px];
+  border-bottom: 1px dotted rgb(var(--line));
+}
+.ledger-value {
+  @apply font-mono text-[15px] font-semibold;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Page-load: one orchestrated stagger ────────────────────────────── */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise { animation: rise 0.5s cubic-bezier(0.21, 0.47, 0.32, 0.98) both; }
+.rise-1 { animation-delay: 0.05s; }
+.rise-2 { animation-delay: 0.14s; }
+.rise-3 { animation-delay: 0.23s; }
+.rise-4 { animation-delay: 0.32s; }
+.rise-5 { animation-delay: 0.41s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rise { animation: none; }
+}
+
+/* ── Focus ──────────────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid rgb(var(--ink));
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ── Form primitives ────────────────────────────────────────────────── */
+.field {
+  /* 16px on touch screens — anything smaller makes iOS Safari zoom the
+     viewport on focus. 14px from sm: up. */
+  @apply w-full bg-transparent border border-line rounded-md px-3 py-2 text-[16px] sm:text-[14px] text-ink placeholder:text-faint;
+}
+.field:focus {
+  outline: none;
+  border-color: rgb(var(--muted));
+}
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-md text-[14px] font-medium px-4 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+}
+.btn-primary {
+  @apply btn bg-ink text-paper hover:opacity-90;
+}
+.btn-ghost {
+  @apply btn border border-line text-ink hover:bg-line/40;
+}
