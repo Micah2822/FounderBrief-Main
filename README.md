@@ -26,6 +26,16 @@ The LLM never originates a number. If a cause isn't in the data, the brief says
 
 ## Setup (~15 minutes)
 
+Create the env file first — every step below writes into it:
+
+```bash
+cp .env.example .env.local
+openssl rand -base64 32   # → ENCRYPTION_KEY in .env.local
+```
+
+`.env.example` is tracked by git, so it only ever holds blank placeholders.
+Real values go in `.env.local`, which `.gitignore` covers via `.env*.local`.
+
 ### 1. Supabase project (the app's own)
 
 1. Create a project at [supabase.com](https://supabase.com).
@@ -127,15 +137,22 @@ Replace `YOURAPP` throughout with your real production domain once you know it
 (Vercel gives you one at first deploy); the callback URLs can be edited on an
 existing OAuth App at any time without invalidating its Client ID or Secret.
 
-### 3. Environment
+### 3. Email delivery
 
-```bash
-cp .env.example .env.local
-openssl rand -base64 32   # → ENCRYPTION_KEY
-```
+Two separate email paths, configured in two different places:
 
-`OPENAI_API_KEY` and `RESEND_API_KEY` are optional: without OpenAI, briefs are
-fully deterministic (still correct); without Resend, no email is sent.
+1. **Brief emails** — sent by the app through Resend (`lib/email/send.ts`).
+   Verify a domain at [resend.com](https://resend.com), put the API key in
+   `RESEND_API_KEY`, and set `EMAIL_FROM` to an address on that domain.
+2. **Sign-in emails** — sent by Supabase, *not* by the code above. Supabase's
+   built-in email service is documented as testing-only and rate-limited to a
+   handful of messages per hour, which breaks signups almost immediately on a
+   public app. Set **custom SMTP** in Supabase → Project Settings → Auth →
+   SMTP Settings, pointing at the same Resend account.
+
+`OPENAI_API_KEY` and `RESEND_API_KEY` are optional in development: without
+OpenAI, briefs are fully deterministic (still correct); without Resend, no
+email is sent.
 
 ### 4. Run
 
@@ -148,10 +165,33 @@ npm run dev
 
 1. Push to GitHub, import into Vercel.
 2. Add all env vars (set `NEXT_PUBLIC_APP_URL` to the production URL and
-   `CRON_SECRET` to a random string — Vercel sends it automatically to the cron).
-3. `vercel.json` schedules `/api/cron/hourly` — each user gets their brief
-   generated and emailed at their own local send hour (default 07:00).
-4. Verify a domain in [Resend](https://resend.com) and set `EMAIL_FROM`.
+   `CRON_SECRET` to a random string — `openssl rand -base64 32`).
+3. Once you know the production domain, replace `YOURAPP` in the three places
+   that hardcode it: Supabase **Site URL**, Supabase **Redirect URLs**, and
+   GitHub **App B**'s Authorization callback URL.
+
+**Scheduling the brief.** `/api/cron/hourly` must run every hour: each run
+serves only the users whose local time has just reached their send hour
+(`app/api/cron/hourly/route.ts`), so a less frequent schedule silently skips
+every other timezone — no error, just users who never receive anything.
+
+Vercel's **Hobby plan allows only one cron per day**, and a deployment whose
+`vercel.json` declares an hourly schedule is rejected at config validation —
+it fails *before* a build record is created, so the Deployments list stays
+empty rather than showing a failure. Hence the split:
+
+- `vercel.json` — daily at 06:00 UTC, within the Hobby limit. Harmless
+  duplicate work; the endpoint is idempotent per (user, day).
+- `.github/workflows/hourly-brief.yml` — the real hourly tick, free. Add
+  `CRON_SECRET` under repo → Settings → Secrets and variables → **Actions**,
+  matching the Vercel value exactly, or the endpoint returns 401. Trigger a
+  test run from the Actions tab (`workflow_dispatch`) rather than waiting.
+
+  GitHub disables scheduled workflows after 60 days of repo inactivity (any
+  commit re-enables them), and the schedule is best-effort, so runs can land a
+  few minutes late.
+
+On Vercel Pro, set `vercel.json` back to `0 * * * *` and delete the workflow.
 
 ## Architecture notes
 
