@@ -11,6 +11,12 @@ export async function GET(request: Request) {
   const savedState = cookies().get("gh_oauth_state")?.value;
 
   if (!code || !state || state !== savedState) {
+    console.error("github callback: state check failed", {
+      hasCode: !!code,
+      hasState: !!state,
+      hasSavedState: !!savedState,
+      stateMatches: state === savedState,
+    });
     return NextResponse.redirect(`${origin}/onboarding?error=github_state`);
   }
 
@@ -27,11 +33,21 @@ export async function GET(request: Request) {
       code,
     }),
   });
-  const token = (await tokenRes.json()).access_token;
-  if (!token) return NextResponse.redirect(`${origin}/onboarding?error=github_token`);
+  // GitHub answers 200 with an error body rather than a non-2xx status, so the
+  // status code alone tells you nothing.
+  const tokenBody = await tokenRes.json();
+  const token = tokenBody.access_token;
+  if (!token) {
+    console.error("github callback: no access token", {
+      status: tokenRes.status,
+      error: tokenBody.error,
+      description: tokenBody.error_description,
+    });
+    return NextResponse.redirect(`${origin}/onboarding?error=github_token`);
+  }
 
   const admin = createAdminClient();
-  await admin.from("integrations").upsert(
+  const { error: saveError } = await admin.from("integrations").upsert(
     {
       user_id: user.id,
       provider: "github",
@@ -41,6 +57,12 @@ export async function GET(request: Request) {
     },
     { onConflict: "user_id,provider" }
   );
+  if (saveError) {
+    // Without this the page redirects to ?step=repos as though it worked, and
+    // the only symptom is a Connect button that never changes.
+    console.error("github callback: failed to save integration", saveError);
+    return NextResponse.redirect(`${origin}/onboarding?error=github_save`);
+  }
 
   const res = NextResponse.redirect(`${origin}/onboarding?step=repos`);
   res.cookies.delete("gh_oauth_state");

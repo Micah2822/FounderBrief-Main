@@ -167,8 +167,8 @@
       </header>
       <h1 class="title-mark rise rise-2">The daily brief for<br>early&#8209;stage founders.</h1>
       <p class="lead mt-8 rise rise-3">
-        It reads what your company actually did yesterday and tells you the three things
-        that matter today. One page. One email. Thirty seconds.
+        Every morning it tells you what changed in your company yesterday,
+        and what to do about it today. One email. Thirty seconds.
       </p>
       <p class="meta mt-10 rise rise-4">Micah Okoko · micahokoko@gmail.com</p>
     </div>
@@ -179,16 +179,16 @@
     <div class="col">
       <p class="eyebrow rise rise-1">The problem</p>
       <h2 class="statement rise rise-2">
-        Founders open six tools every morning and still cannot say what changed.
+        You check six tools every morning and still don&rsquo;t know what changed.
       </h2>
       <p class="lead mt-8 rise rise-3">
-        GitHub knows what shipped. Stripe knows what was paid. The database knows who signed up.
-        Analytics knows who visited. Each one answers its own question. None of them answer the
-        founder&rsquo;s: <strong>what happened, and what do I do about it.</strong>
+        GitHub knows what shipped. Stripe knows who paid. Your database knows who signed up.
+        Each tool answers its own question. None of them answer yours:
+        <strong>what happened, and what should I do today?</strong>
       </p>
       <p class="fine mt-5 rise rise-4">
-        So the check gets skipped. A regression sits for eleven days. A channel that was working
-        stops working and nobody notices until the month closes.
+        So you stop checking. A bug sits for two weeks. A channel that was working dies
+        and you find out at the end of the month.
       </p>
     </div>
   </section>
@@ -198,7 +198,7 @@
     <div class="col">
       <p class="eyebrow rise rise-1">The solution</p>
       <h2 class="statement rise rise-2">
-        A wire dispatch about your own company, every morning.
+        One email every morning. Here is what changed.
       </h2>
       <div class="mt-10 rise rise-3">
         <div class="ledger-row">
@@ -221,7 +221,7 @@
         Activation fell the day the onboarding form shipped. Roll it back, or split the step.
       </p>
       <p class="fine mt-5 rise rise-5">
-        No dashboard. No tabs. Nothing to monitor. Something you finish reading.
+        No dashboard. Nothing to log into. You read it and you are done.
       </p>
     </div>
   </section>
@@ -233,17 +233,17 @@
       <h2 class="statement rise rise-2">Built. Running nightly.</h2>
       <div class="pipe mt-10 rise rise-3">
         <div><span class="step">collect</span><span class="what">GitHub &mdash; merged PRs, commits, deploys, open PRs</span></div>
-        <div><span class="step">collect</span><span class="what">Supabase &mdash; signups, from a table you map</span></div>
-        <div><span class="step">collect</span><span class="what">Plausible &mdash; visitors, referrers</span></div>
+        <div><span class="step">collect</span><span class="what">Supabase &mdash; new signups</span></div>
+        <div><span class="step">collect</span><span class="what">Plausible &mdash; visitors, where they came from</span></div>
         <div><span class="step">collect</span><span class="what">Stripe &mdash; revenue, new customers</span></div>
-        <div><span class="step">diff</span><span class="what">deterministic engine &mdash; deltas, streaks, gaps</span></div>
-        <div><span class="step">polish</span><span class="what">model rewrites the prose &mdash; prose only</span></div>
-        <div><span class="step">validate</span><span class="what">every figure must exist in the facts</span></div>
-        <div><span class="step">deliver</span><span class="what">one page, one email</span></div>
+        <div><span class="step">compare</span><span class="what">code works out every number</span></div>
+        <div><span class="step">write</span><span class="what">AI turns it into sentences</span></div>
+        <div><span class="step">check</span><span class="what">every number is matched back to the data</span></div>
+        <div><span class="step">send</span><span class="what">one page, one email</span></div>
       </div>
       <p class="fine mt-8 rule rise rise-4">
-        Setup is fifteen minutes. The founder&rsquo;s database is queried with counts only &mdash;
-        row contents are never read and never leave their infrastructure.
+        Setup takes fifteen minutes. We only count rows in your database.
+        We never read what is inside them.
       </p>
     </div>
   </section>
@@ -252,15 +252,14 @@
   <section class="slide">
     <div class="col">
       <p class="eyebrow rise rise-1">The insight</p>
-      <h2 class="statement rise rise-2">The model never originates a number.</h2>
+      <h2 class="statement rise rise-2">The AI never makes up a number.</h2>
       <p class="lead mt-8 rise rise-3">
-        Every figure is computed by a deterministic engine, then validated against the source
-        facts before it ships. The language model is allowed to write sentences and nothing else.
-        When a cause is not in the data, the brief says <em>cause unknown from connected data</em>.
+        Every number is worked out by code, then checked against the raw data before the
+        email goes out. The AI only writes the sentences. If the data does not explain why
+        something happened, the brief says so.
       </p>
       <p class="insight mt-8 rise rise-4">
-        An AI analyst that is wrong once is deleted. Trust is not a feature of this product.
-        It is the product.
+        An AI that gets one number wrong gets deleted. Trust is the whole product.
       </p>
     </div>
   </section>
@@ -270,20 +269,19 @@
     <div class="col">
       <p class="eyebrow rise rise-1">Why we win the entry point</p>
       <h2 class="statement rise rise-2">
-        Every founder tool assumes revenue already exists. Ours doesn&rsquo;t.
+        Every other tool needs traffic and revenue first. We don&rsquo;t.
       </h2>
       <p class="lead mt-8 rise rise-3">
-        Mixpanel, Amplitude and Databox need event volume to be useful. A pre&#8209;product&#8209;market&#8209;fit
-        founder has commits, deploys, a handful of signups and a landing page &mdash; which is exactly
-        the data Founder Brief reads.
+        Mixpanel and Amplitude only become useful once you have real volume. An early founder
+        has code, deploys, a few signups and a landing page. That is exactly what we read.
       </p>
       <p class="body mt-5 rise rise-4">
-        We are useful on day one of a company, arrive before the analytics decision is made, and are
-        already installed when it is. The incumbents cannot follow down&#8209;market without becoming a
-        worse version of themselves.
+        So we are useful on day one. By the time a founder is big enough to buy Mixpanel,
+        we are already installed. The big tools cannot come down here without breaking
+        their own product.
       </p>
       <p class="note mt-5 rise rise-5">
-        Those tools show data. This shows decisions. Different category, different buyer, same founder.
+        They show you data. We tell you what to do.
       </p>
     </div>
   </section>
@@ -291,18 +289,18 @@
   <!-- 07 · MOAT -->
   <section class="slide">
     <div class="col">
-      <p class="eyebrow rise rise-1">Why it compounds</p>
+      <p class="eyebrow rise rise-1">Why it gets harder to copy</p>
       <h2 class="statement rise rise-2">
-        A daily habit that accumulates a record no competitor can reconstruct.
+        Every brief adds to a record nobody else can rebuild.
       </h2>
       <ol class="numbered mt-10 rise rise-3">
-        <li><span class="ord">01</span><span class="txt">Every brief is an event and an outcome, dated. Over time that is a labelled history of what changes moved which metric.</span></li>
-        <li><span class="ord">02</span><span class="txt">Across companies it becomes a benchmark: your activation is 32%, comparable startups run 41%. No single founder can build that.</span></li>
-        <li><span class="ord">03</span><span class="txt">The history, the metric mapping and the connected integrations do not export. Leaving costs the founder their record.</span></li>
+        <li><span class="ord">01</span><span class="txt">Each brief pairs a change with what happened next. Over time that becomes a history of what actually works.</span></li>
+        <li><span class="ord">02</span><span class="txt">Across thousands of companies it becomes a benchmark. Your activation is 32%. Similar startups run 41%. No founder can work that out alone.</span></li>
+        <li><span class="ord">03</span><span class="txt">None of it exports. Leaving means losing your own history.</span></li>
       </ol>
       <p class="fine mt-8 rule rise rise-4">
-        The first version is easy to copy. The third year is not. The asset is the outcome data,
-        not the daily email.
+        The first version is easy to copy. Year three is not.
+        The data is the asset, not the email.
       </p>
     </div>
   </section>
@@ -335,10 +333,10 @@
         </div>
       </div>
       <p class="fine mt-8 rise rise-4">
-        The free tier is the distribution channel. Briefs are read every morning, so the
-        product reminds the founder it exists without a growth team.
+        The free tier is how we grow. The brief lands every morning, so it reminds
+        people it exists without us spending anything.
       </p>
-      <p class="note mt-2 rise rise-5">Planned pricing. Not yet tested against willingness to pay.</p>
+      <p class="note mt-2 rise rise-5">Planned pricing. Not tested yet.</p>
     </div>
   </section>
 
@@ -365,11 +363,11 @@
         </div>
       </div>
       <p class="lead mt-8 rise rise-4">
-        Ten thousand customers at $50 average is $500k MRR. The bounding number is not how many
-        startups exist &mdash; it is how many are technical enough to connect a repository, which is
-        the segment already growing fastest.
+        Ten thousand customers at $50 a month is $500k MRR. The limit is not how many
+        startups exist. It is how many can connect a code repo &mdash; and that group is
+        growing fastest.
       </p>
-      <p class="note mt-4 rise rise-5">Figures pending. No number is stated here until it is sourced.</p>
+      <p class="note mt-4 rise rise-5">Figures still to confirm.</p>
     </div>
   </section>
 
@@ -401,11 +399,11 @@
         </div>
       </div>
       <p class="lead mt-8 rise rise-4">
-        The pipeline runs nightly in production against a live company. Authentication, encryption
-        at rest, row&#8209;level security and the validation layer are done. What remains is users.
+        It runs every night on a real company. Sign&#8209;in, encryption, security and the
+        number&#8209;checking layer are all done. What is missing is users.
       </p>
       <p class="note mt-4 rise rise-5">
-        We are not going to present a traction slide we do not have.
+        No traction slide, because there is no traction yet.
       </p>
     </div>
   </section>
@@ -416,8 +414,8 @@
       <p class="eyebrow rise rise-1">Founder</p>
       <h2 class="statement rise rise-2">Micah Okoko</h2>
       <p class="lead mt-8 rise rise-3">
-        Solo founder. Built and shipped the whole system &mdash; ingestion, the deterministic diff
-        engine, the validation layer, auth, email delivery and the design system &mdash; end to end.
+        Solo founder. Built the whole thing: the integrations, the engine that works out
+        every number, the checking layer, sign&#8209;in, email and the design.
       </p>
       <ol class="numbered mt-8 rise rise-4">
         <li><span class="ord">01</span><span class="txt">[Prior company or role]</span></li>
@@ -437,24 +435,24 @@
       <h2 class="statement rise rise-2">$100,000</h2>
       <div class="mt-10 rise rise-3">
         <div class="ledger-row">
-          <span class="ledger-label">Distribution &mdash; get briefs into founders&rsquo; inboxes</span>
+          <span class="ledger-label">Getting founders to try it</span>
           <span class="ledger-leader" aria-hidden="true"></span>
           <span class="ledger-value">60%</span>
         </div>
         <div class="ledger-row">
-          <span class="ledger-label">Integrations &mdash; the next four data sources</span>
+          <span class="ledger-label">The next four integrations</span>
           <span class="ledger-leader" aria-hidden="true"></span>
           <span class="ledger-value">25%</span>
         </div>
         <div class="ledger-row">
-          <span class="ledger-label">Infrastructure and inference</span>
+          <span class="ledger-label">Servers and AI costs</span>
           <span class="ledger-leader" aria-hidden="true"></span>
           <span class="ledger-value">15%</span>
         </div>
       </div>
       <p class="closing mt-10 rise rise-4">
-        The goal of this money is one number: founders who open the brief tomorrow,
-        and the day after that.
+        This money buys one thing: founders who open the brief tomorrow,
+        and the day after.
       </p>
       <p class="meta mt-8 rise rise-5">Micah Okoko · micahokoko@gmail.com</p>
     </div>
