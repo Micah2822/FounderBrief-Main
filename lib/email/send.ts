@@ -42,7 +42,7 @@ export function renderBriefEmail(brief: Brief, appUrl: string): string {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:40px 20px;">
   <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
     <tr><td style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:0.14em;color:${muted};text-transform:uppercase;border-top:2px solid ${ink};border-bottom:1px solid ${line};padding:10px 0;">
-      Founder Brief &nbsp;·&nbsp; No. ${brief.day_number} &nbsp;·&nbsp; ${esc(formatBriefDate(brief.brief_date))}
+      Founder Brief &nbsp;·&nbsp; No. ${brief.day_number} &nbsp;·&nbsp; Covering ${esc(formatBriefDate(brief.brief_date))}
     </td></tr>
     <tr><td style="padding:36px 0 8px;">
       <div style="font-family:Georgia,'Times New Roman',serif;font-size:32px;color:${ink};">Good morning.</div>

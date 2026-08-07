@@ -8,8 +8,13 @@ export function BriefView({ brief, greeting }: { brief: Brief; greeting: string 
       <header className="rise border-t-2 border-ink">
         <p className="eyebrow flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-line py-[10px]">
           <span>Founder Brief</span>
+          {/* The date is the period the brief covers, not the day it was
+              issued — a masthead reads as an issue date unless it says
+              otherwise, which is exactly how it gets misread. */}
           <span>
-            No. {brief.day_number} · {formatBriefDate(brief.brief_date)}
+            No. {brief.day_number} ·{" "}
+            {brief.partial ? "Today so far" : "Covering"}{" "}
+            {formatBriefDate(brief.brief_date)}
           </span>
         </p>
       </header>
@@ -19,8 +24,11 @@ export function BriefView({ brief, greeting }: { brief: Brief; greeting: string 
       </h1>
 
       {/* Yesterday — the ledger */}
-      <section className="rise rise-2 mt-10" aria-label="Yesterday">
-        <p className="eyebrow mb-2">Yesterday</p>
+      <section
+        className="rise rise-2 mt-10"
+        aria-label={brief.partial ? "Today so far" : "Yesterday"}
+      >
+        <p className="eyebrow mb-2">{brief.partial ? "Today so far" : "Yesterday"}</p>
         <div>
           {brief.yesterday.map((row) => (
             <div key={row.label} className="ledger-row">

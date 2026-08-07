@@ -1,6 +1,12 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { decrypt } from "@/lib/crypto";
-import { addDays, dayRangeUTC, localDateString, weekday } from "@/lib/dates";
+import {
+  addDays,
+  dayRangeUTC,
+  localDateString,
+  localMidnightUTC,
+  weekday,
+} from "@/lib/dates";
 import { collectGitHub, daysSinceLastShip } from "@/lib/collectors/github";
 import { collectProduct, countInWindow } from "@/lib/collectors/supabase";
 import { collectTraffic, visitorsInWindow } from "@/lib/collectors/plausible";
@@ -22,7 +28,8 @@ import type { Brief, Facts, IntegrationRow, UserSettings } from "@/lib/types";
  */
 export async function generateBriefForUser(
   userId: string,
-  dateStr?: string
+  dateStr?: string,
+  opts: { partial?: boolean } = {}
 ): Promise<Brief | null> {
   const db = createAdminClient();
 
@@ -31,8 +38,25 @@ export async function generateBriefForUser(
     db.from("integrations").select("*").eq("user_id", userId),
   ]);
   const tz = (settings as UserSettings | null)?.timezone ?? "UTC";
-  const date = dateStr ?? addDays(localDateString(tz), -1); // yesterday, user-local
-  const range = dayRangeUTC(date, tz);
+  const partial = opts.partial === true;
+  const now = new Date();
+  const date =
+    dateStr ?? (partial ? localDateString(tz) : addDays(localDateString(tz), -1));
+
+  // A partial brief covers midnight → now, and compares against the *same
+  // hours* of the previous day. Measuring a half-finished day against a whole
+  // one would show a decline every single time — a number that is arithmetically
+  // true and completely misleading, which this product exists not to print.
+  const range = partial
+    ? { from: localMidnightUTC(date, tz), to: now }
+    : dayRangeUTC(date, tz);
+  const prevRange = partial
+    ? {
+        from: localMidnightUTC(addDays(date, -1), tz),
+        to: new Date(now.getTime() - 86400000),
+      }
+    : dayRangeUTC(addDays(date, -1), tz);
+
   const ints = (integrations ?? []) as IntegrationRow[];
 
   const github = ints.find((i) => i.provider === "github");
@@ -42,6 +66,7 @@ export async function generateBriefForUser(
   if (!github && !product && !traffic && !stripe) return null;
 
   const facts: Facts = { date, weekday: weekday(date), gaps: [] };
+  if (partial) facts.partial = true;
   const goal = (settings as UserSettings | null)?.goal?.trim();
   if (goal) facts.founder_goal = goal; // in facts, so its numbers join the allowlist
 
@@ -53,7 +78,7 @@ export async function generateBriefForUser(
       const [day, lastShip, prevDay] = await Promise.all([
         collectGitHub(token, repos, range, date),
         daysSinceLastShip(token, repos, date),
-        collectGitHub(token, repos, dayRangeUTC(addDays(date, -1), tz), addDays(date, -1)),
+        collectGitHub(token, repos, prevRange, addDays(date, -1)),
       ]);
       facts.github = { ...day, commits_prev_day: prevDay.commits, days_since_last_ship: lastShip };
       await db.from("daily_metrics").upsert(
@@ -71,7 +96,6 @@ export async function generateBriefForUser(
     try {
       const key = decrypt(product.access_token);
       const { url, table, ts_column } = product.config;
-      const prevRange = dayRangeUTC(addDays(date, -1), tz);
       const weekRange = { from: dayRangeUTC(addDays(date, -6), tz).from, to: range.to };
       const prevWeekRange = {
         from: dayRangeUTC(addDays(date, -13), tz).from,
@@ -135,7 +159,6 @@ export async function generateBriefForUser(
   if (stripe?.access_token) {
     try {
       const key = decrypt(stripe.access_token);
-      const prevRange = dayRangeUTC(addDays(date, -1), tz);
       const weekRange = { from: dayRangeUTC(addDays(date, -6), tz).from, to: range.to };
       const prevWeekRange = {
         from: dayRangeUTC(addDays(date, -13), tz).from,
@@ -169,6 +192,23 @@ export async function generateBriefForUser(
 
   facts.gaps.push(...findGaps(facts));
 
+  if (partial) {
+    const asOf = new Intl.DateTimeFormat("en-GB", {
+      timeZone: tz,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(now);
+    facts.gaps.unshift(
+      `Today isn't over — these figures cover midnight to ${asOf}, compared with the same hours yesterday.`
+    );
+    if (facts.traffic) {
+      // Plausible reports by whole day, so this one row can't be windowed the
+      // way the others are. Say so rather than quietly mixing the two.
+      facts.gaps.push("Visitor figures are for whole days, not the partial window.");
+    }
+  }
+
   // ── Compose: deterministic baseline, optionally polished by the LLM ──
   const ledger = buildLedger(facts);
   let insight = baselineInsight(facts);
@@ -199,6 +239,7 @@ export async function generateBriefForUser(
     priorities,
     gaps: facts.gaps,
     generated_with,
+    ...(partial ? { partial: true } : {}),
   };
 
   await db.from("briefs").upsert(
@@ -238,7 +279,11 @@ async function polishWithLLM(
       const res = await client.responses.create({
         model: process.env.OPENAI_MODEL || "gpt-4o-mini",
         instructions: SYSTEM,
-        input: `Facts for ${facts.weekday} ${facts.date}:\n${JSON.stringify(facts, null, 2)}\n\nBaseline (improve on this, keep it truthful):\ninsight: ${fallbackInsight}\npriorities: ${JSON.stringify(fallbackPriorities)}`,
+        input: `${
+          facts.partial
+            ? "IMPORTANT: this brief covers TODAY SO FAR — midnight until now, a day still in progress. Never describe it as \"yesterday\" or as a finished day. Figures are compared against the same hours of the previous day.\n\n"
+            : ""
+        }Facts for ${facts.weekday} ${facts.date}:\n${JSON.stringify(facts, null, 2)}\n\nBaseline (improve on this, keep it truthful):\ninsight: ${fallbackInsight}\npriorities: ${JSON.stringify(fallbackPriorities)}`,
       });
       const text = res.output_text?.trim() ?? "";
       const json = JSON.parse(text.replace(/^```(json)?|```$/g, "").trim());

@@ -44,8 +44,17 @@ Real values go in `.env.local`, which `.gitignore` covers via `.env*.local`.
      until you deliberately grant access).
    - **Enable automatic RLS**: ON (new tables get RLS on from creation).
 2. Run the files in `supabase/migrations/` in the SQL editor, in filename
-   order. `0002` installs a trigger on `auth.users`, so run it from the SQL
-   editor (which has the privileges) rather than from a client.
+   order. Run them from the SQL editor rather than from a client: `0002`
+   installs a trigger on `auth.users` and `0003` issues `GRANT`s, both of
+   which need privileges a client key does not have.
+
+   `0003` is not optional. Because **Automatically expose new tables** is OFF
+   (step 1), tables are created with no privileges granted to any role —
+   enabling RLS and writing policies is *not* sufficient, since RLS filters
+   rows for a role that already holds the table privilege. Without the grants
+   every server write fails with `42501 permission denied`, and because the
+   app treats a failed write as a no-op the only symptom is a UI that never
+   changes state.
 3. Auth → Providers → enable **Email**.
 4. Auth → Email Templates — **required, sign-in is broken without it.**
 

@@ -57,6 +57,7 @@ export type Facts = {
     week_change_pct: number | null;
   };
   founder_goal?: string; // the founder's stated focus, verbatim
+  partial?: boolean; // covers midnight → now, not a finished day
   gaps: string[]; // honest holes: "Stripe not connected", "No deploys in 3 days"
 };
 
@@ -76,6 +77,11 @@ export type Brief = {
   priorities: string[];
   gaps: string[];
   generated_with: "ai" | "deterministic";
+  // True when the brief covers a day still in progress (midnight → now) rather
+  // than a closed one. Optional so briefs stored before this existed still
+  // deserialize. Its comparisons are measured against the same hours of the
+  // previous day, never against a whole day the period hasn't finished.
+  partial?: boolean;
 };
 
 export type IntegrationRow = {
