@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-// Not the primary sign-in path any more — sign-in is a 6-digit code verified
+// Not the primary sign-in path any more — sign-in is an emailed code verified
 // in the browser (app/login/page.tsx), which never redirects here. This stays
 // as a safety net: if an auth email template is ever left holding
 // {{ .ConfirmationURL }} instead of {{ .Token }}, the link it sends still

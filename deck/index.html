@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Founder Brief — Seed Deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:250 250 248; --ink:25 28 31; --muted:110 115 120;
+    --faint:155 160 166; --line:230 228 223; --ledger:30 110 80; --oxide:168 67 44;
+    --font-serif:"Newsreader",Georgia,serif;
+    --font-sans:"Inter",Helvetica,Arial,sans-serif;
+    --font-mono:"IBM Plex Mono",Menlo,ui-monospace,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:15 17 19; --ink:233 231 226; --muted:139 144 150;
+      --faint:100 105 111; --line:38 41 45; --ledger:84 178 138; --oxide:217 111 82;
+    }
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:rgb(var(--paper)); color:rgb(var(--ink));
+    font-family:var(--font-sans); font-size:15px;
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  ::selection{background:rgb(var(--ink)/.9); color:rgb(var(--paper))}
+  :focus-visible{outline:2px solid rgb(var(--ink)); outline-offset:2px; border-radius:2px}
+
+  /* ---------- slide frame ---------- */
+  .deck{position:relative;height:100vh;width:100%}
+  .slide{
+    position:absolute; inset:0;
+    display:none; align-items:center; justify-content:center;
+    padding:56px 24px 72px;
+  }
+  .slide.is-active{display:flex}
+  .col{width:100%; max-width:640px}
+
+  /* ---------- masthead ---------- */
+  .masthead{border-top:2px solid rgb(var(--ink))}
+  .masthead p{
+    display:flex; align-items:baseline; justify-content:space-between;
+    border-bottom:1px solid rgb(var(--line)); padding:10px 0;
+  }
+  .eyebrow{
+    font-family:var(--font-mono); font-size:11px; text-transform:uppercase;
+    letter-spacing:.14em; color:rgb(var(--muted));
+  }
+
+  /* ---------- type ---------- */
+  .statement{
+    font-family:var(--font-serif); font-size:34px; line-height:1.15;
+    font-weight:400; margin-top:40px;
+  }
+  .statement em{font-style:normal; color:rgb(var(--ink))}
+  .title-mark{font-family:var(--font-serif); font-size:42px; line-height:1.1; margin-top:40px}
+  .closing{font-family:var(--font-serif); font-size:22px; line-height:1.35}
+  .insight{font-family:var(--font-serif); font-size:19px; line-height:1.6}
+  .lead{font-size:16px; line-height:1.65; color:rgb(var(--muted))}
+  .body{font-size:15px; line-height:1.65; color:rgb(var(--muted))}
+  .fine{font-size:13px; line-height:1.6; color:rgb(var(--muted))}
+  .note{font-size:13px; color:rgb(var(--faint))}
+  .meta{font-family:var(--font-mono); font-size:12px; color:rgb(var(--muted))}
+  strong{font-weight:500; color:rgb(var(--ink))}
+  @media (min-width:640px){
+    .statement{font-size:42px}
+    .title-mark{font-size:52px}
+  }
+
+  .mt-2{margin-top:8px} .mt-4{margin-top:16px} .mt-5{margin-top:20px}
+  .mt-8{margin-top:32px} .mt-10{margin-top:40px} .mt-16{margin-top:64px}
+  .mb-2{margin-bottom:8px} .mb-4{margin-bottom:16px} .mb-5{margin-bottom:20px}
+  .rule{border-top:1px solid rgb(var(--line)); padding-top:20px}
+  .rule-ink{border-top:2px solid rgb(var(--ink)); padding-top:20px}
+
+  /* ---------- ledger ---------- */
+  .ledger-row{display:flex; align-items:baseline; padding:7px 0}
+  .ledger-row + .ledger-row{border-top:1px solid rgb(var(--line)/.6)}
+  .ledger-label{font-size:15px; white-space:nowrap}
+  .ledger-leader{
+    flex:1 1 auto; margin:0 10px;
+    border-bottom:1px dotted rgb(var(--line));
+    transform:translateY(-4px);
+  }
+  .ledger-value{
+    font-family:var(--font-mono); font-size:15px; font-weight:600;
+    font-variant-numeric:tabular-nums; white-space:nowrap;
+  }
+  .ledger-value.blank{color:rgb(var(--faint)); font-weight:400}
+  .delta{margin-left:8px; font-size:12px; font-family:var(--font-mono)}
+  .up{color:rgb(var(--ledger))} .down{color:rgb(var(--oxide))} .flat{color:rgb(var(--muted))}
+
+  /* ---------- pipeline / mono block ---------- */
+  .pipe{font-family:var(--font-mono); font-size:13px; line-height:2.1}
+  .pipe .step{color:rgb(var(--ink)); font-weight:500; display:inline-block; width:78px}
+  .pipe .what{color:rgb(var(--muted))}
+
+  .numbered{list-style:none}
+  .numbered li{display:flex; gap:14px; padding:10px 0}
+  .numbered li + li{border-top:1px solid rgb(var(--line))}
+  .numbered .ord{font-family:var(--font-mono); font-size:12px; color:rgb(var(--faint)); padding-top:3px}
+  .numbered .txt{font-size:15px; line-height:1.55}
+
+  /* ---------- chrome ---------- */
+  .footer{
+    position:fixed; left:0; right:0; bottom:0;
+    display:flex; justify-content:space-between; align-items:baseline;
+    padding:14px 24px; font-family:var(--font-mono); font-size:12px;
+    color:rgb(var(--muted));
+    border-top:1px solid rgb(var(--line));
+    background:rgb(var(--paper));
+  }
+  .footer .nav{display:flex; gap:14px}
+  .footer button{
+    background:none; border:0; padding:0; cursor:pointer;
+    font-family:var(--font-mono); font-size:12px; color:rgb(var(--muted));
+    transition:color .15s;
+  }
+  .footer button:hover{color:rgb(var(--ink))}
+  .footer button:disabled{opacity:.35; cursor:default}
+
+  /* ---------- stagger ---------- */
+  @keyframes rise{from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none}}
+  .is-active .rise{animation:rise .45s ease-out both}
+  .is-active .rise-1{animation-delay:.05s}
+  .is-active .rise-2{animation-delay:.14s}
+  .is-active .rise-3{animation-delay:.23s}
+  .is-active .rise-4{animation-delay:.32s}
+  .is-active .rise-5{animation-delay:.41s}
+  @media (prefers-reduced-motion:reduce){ .is-active .rise{animation:none} }
+
+  /* ---------- print → PDF ---------- */
+  @page{size:1280px 720px; margin:0}
+  @media print{
+    :root{
+      --paper:250 250 248; --ink:25 28 31; --muted:110 115 120;
+      --faint:155 160 166; --line:230 228 223; --ledger:30 110 80; --oxide:168 67 44;
+    }
+    body{overflow:visible}
+    .deck{height:auto}
+    .footer{display:none}
+    .slide{
+      position:relative; display:flex !important; inset:auto;
+      height:720px; width:1280px; page-break-after:always; break-after:page;
+      padding:64px 24px;
+    }
+    .rise{animation:none !important; opacity:1 !important; transform:none !important}
+  }
+</style>
+</head>
+<body>
+
+<main class="deck" id="deck">
+
+  <!-- 01 · TITLE -->
+  <section class="slide is-active">
+    <div class="col">
+      <header class="masthead rise rise-1">
+        <p><span class="eyebrow">Founder Brief</span><span class="eyebrow">Seed · August 2026</span></p>
+      </header>
+      <h1 class="title-mark rise rise-2">The daily brief for<br>early&#8209;stage founders.</h1>
+      <p class="lead mt-8 rise rise-3">
+        It reads what your company actually did yesterday and tells you the three things
+        that matter today. One page. One email. Thirty seconds.
+      </p>
+      <p class="meta mt-10 rise rise-4">Micah Okoko · micahokoko@gmail.com</p>
+    </div>
+  </section>
+
+  <!-- 02 · PROBLEM -->
+  <section class="slide">
+    <div class="col">
+      <p class="eyebrow rise rise-1">The problem</p>
+      <h2 class="statement rise rise-2">
+        Founders open six tools every morning and still cannot say what changed.
+      </h2>
+      <p class="lead mt-8 rise rise-3">
+        GitHub knows what shipped. Stripe knows what was paid. The database knows who signed up.
+        Analytics knows who visited. Each one answers its own question. None of them answer the
+        founder&rsquo;s: <strong>what happened, and what do I do about it.</strong>
+      </p>
+      <p class="fine mt-5 rise rise-4">
+        So the check gets skipped. A regression sits for eleven days. A channel that was working
+        stops working and nobody notices until the month closes.
+      </p>
+    </div>
+  </section>
+
+  <!-- 03 · SOLUTION -->
+  <section class="slide">
+    <div class="col">
+      <p class="eyebrow rise rise-1">The solution</p>
+      <h2 class="statement rise rise-2">
+        A wire dispatch about your own company, every morning.
+      </h2>
+      <div class="mt-10 rise rise-3">
+        <div class="ledger-row">
+          <span class="ledger-label">Signups <span class="delta up">+18%</span></span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value">47</span>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-label">Pull requests merged <span class="delta flat">&mdash;</span></span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value">6</span>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-label">Activation <span class="delta down">&minus;7%</span></span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value">29%</span>
+        </div>
+      </div>
+      <p class="insight mt-8 rise rise-4">
+        Activation fell the day the onboarding form shipped. Roll it back, or split the step.
+      </p>
+      <p class="fine mt-5 rise rise-5">
+        No dashboard. No tabs. Nothing to monitor. Something you finish reading.
+      </p>
+    </div>
+  </section>
+
+  <!-- 04 · PRODUCT -->
+  <section class="slide">
+    <div class="col">
+      <p class="eyebrow rise rise-1">How it works</p>
+      <h2 class="statement rise rise-2">Built. Running nightly.</h2>
+      <div class="pipe mt-10 rise rise-3">
+        <div><span class="step">collect</span><span class="what">GitHub &mdash; merged PRs, commits, deploys, open PRs</span></div>
+        <div><span class="step">collect</span><span class="what">Supabase &mdash; signups, from a table you map</span></div>
+        <div><span class="step">collect</span><span class="what">Plausible &mdash; visitors, referrers</span></div>
+        <div><span class="step">collect</span><span class="what">Stripe &mdash; revenue, new customers</span></div>
+        <div><span class="step">diff</span><span class="what">deterministic engine &mdash; deltas, streaks, gaps</span></div>
+        <div><span class="step">polish</span><span class="what">model rewrites the prose &mdash; prose only</span></div>
+        <div><span class="step">validate</span><span class="what">every figure must exist in the facts</span></div>
+        <div><span class="step">deliver</span><span class="what">one page, one email</span></div>
+      </div>
+      <p class="fine mt-8 rule rise rise-4">
+        Setup is fifteen minutes. The founder&rsquo;s database is queried with counts only &mdash;
+        row contents are never read and never leave their infrastructure.
+      </p>
+    </div>
+  </section>
+
+  <!-- 05 · INSIGHT -->
+  <section class="slide">
+    <div class="col">
+      <p class="eyebrow rise rise-1">The insight</p>
+      <h2 class="statement rise rise-2">The model never originates a number.</h2>
+      <p class="lead mt-8 rise rise-3">
+        Every figure is computed by a deterministic engine, then validated against the source
+        facts before it ships. The language model is allowed to write sentences and nothing else.
+        When a cause is not in the data, the brief says <em>cause unknown from connected data</em>.
+      </p>
+      <p class="insight mt-8 rise rise-4">
+        An AI analyst that is wrong once is deleted. Trust is not a feature of this product.
+        It is the product.
+      </p>
+    </div>
+  </section>
+
+  <!-- 06 · WEDGE -->
+  <section class="slide">
+    <div class="col">
+      <p class="eyebrow rise rise-1">Why we win the entry point</p>
+      <h2 class="statement rise rise-2">
+        Every founder tool assumes revenue already exists. Ours doesn&rsquo;t.
+      </h2>
+      <p class="lead mt-8 rise rise-3">
+        Mixpanel, Amplitude and Databox need event volume to be useful. A pre&#8209;product&#8209;market&#8209;fit
+        founder has commits, deploys, a handful of signups and a landing page &mdash; which is exactly
+        the data Founder Brief reads.
+      </p>
+      <p class="body mt-5 rise rise-4">
+        We are useful on day one of a company, arrive before the analytics decision is made, and are
+        already installed when it is. The incumbents cannot follow down&#8209;market without becoming a
+        worse version of themselves.
+      </p>
+      <p class="note mt-5 rise rise-5">
+        Those tools show data. This shows decisions. Different category, different buyer, same founder.
+      </p>
+    </div>
+  </section>
+
+  <!-- 07 · MOAT -->
+  <section class="slide">
+    <div class="col">
+      <p class="eyebrow rise rise-1">Why it compounds</p>
+      <h2 class="statement rise rise-2">
+        A daily habit that accumulates a record no competitor can reconstruct.
+      </h2>
+      <ol class="numbered mt-10 rise rise-3">
+        <li><span class="ord">01</span><span class="txt">Every brief is an event and an outcome, dated. Over time that is a labelled history of what changes moved which metric.</span></li>
+        <li><span class="ord">02</span><span class="txt">Across companies it becomes a benchmark: your activation is 32%, comparable startups run 41%. No single founder can build that.</span></li>
+        <li><span class="ord">03</span><span class="txt">The history, the metric mapping and the connected integrations do not export. Leaving costs the founder their record.</span></li>
+      </ol>
+      <p class="fine mt-8 rule rise rise-4">
+        The first version is easy to copy. The third year is not. The asset is the outcome data,
+        not the daily email.
+      </p>
+    </div>
+  </section>
+
+  <!-- 08 · BUSINESS MODEL -->
+  <section class="slide">
+    <div class="col">
+      <p class="eyebrow rise rise-1">Business model</p>
+      <h2 class="statement rise rise-2">Subscription. Priced to the size of the company.</h2>
+      <div class="mt-10 rise rise-3">
+        <div class="ledger-row">
+          <span class="ledger-label">Free &mdash; two integrations</span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value">$0</span>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-label">Solo founder</span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value">$29 / mo</span>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-label">Startup team</span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value">$79 / mo</span>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-label">Growth company</span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value">$199 / mo</span>
+        </div>
+      </div>
+      <p class="fine mt-8 rise rise-4">
+        The free tier is the distribution channel. Briefs are read every morning, so the
+        product reminds the founder it exists without a growth team.
+      </p>
+      <p class="note mt-2 rise rise-5">Planned pricing. Not yet tested against willingness to pay.</p>
+    </div>
+  </section>
+
+  <!-- 09 · MARKET -->
+  <section class="slide">
+    <div class="col">
+      <p class="eyebrow rise rise-1">Market</p>
+      <h2 class="statement rise rise-2">Every company with a repository and a database.</h2>
+      <div class="mt-10 rise rise-3">
+        <div class="ledger-row">
+          <span class="ledger-label">Startups founded per year, global</span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value blank">[&mdash;]</span>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-label">Reachable software startups</span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value blank">[&mdash;]</span>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-label">Serviceable market at $50 ARPU</span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value blank">[&mdash;]</span>
+        </div>
+      </div>
+      <p class="lead mt-8 rise rise-4">
+        Ten thousand customers at $50 average is $500k MRR. The bounding number is not how many
+        startups exist &mdash; it is how many are technical enough to connect a repository, which is
+        the segment already growing fastest.
+      </p>
+      <p class="note mt-4 rise rise-5">Figures pending. No number is stated here until it is sourced.</p>
+    </div>
+  </section>
+
+  <!-- 10 · STATUS -->
+  <section class="slide">
+    <div class="col">
+      <p class="eyebrow rise rise-1">Status</p>
+      <h2 class="statement rise rise-2">Product complete. Not yet launched.</h2>
+      <div class="mt-10 rise rise-3">
+        <div class="ledger-row">
+          <span class="ledger-label">Integrations shipped</span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value">4</span>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-label">Active founders</span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value blank">[0]</span>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-label">Briefs delivered</span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value blank">[&mdash;]</span>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-label">Revenue</span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value blank">[&mdash;]</span>
+        </div>
+      </div>
+      <p class="lead mt-8 rise rise-4">
+        The pipeline runs nightly in production against a live company. Authentication, encryption
+        at rest, row&#8209;level security and the validation layer are done. What remains is users.
+      </p>
+      <p class="note mt-4 rise rise-5">
+        We are not going to present a traction slide we do not have.
+      </p>
+    </div>
+  </section>
+
+  <!-- 11 · FOUNDER -->
+  <section class="slide">
+    <div class="col">
+      <p class="eyebrow rise rise-1">Founder</p>
+      <h2 class="statement rise rise-2">Micah Okoko</h2>
+      <p class="lead mt-8 rise rise-3">
+        Solo founder. Built and shipped the whole system &mdash; ingestion, the deterministic diff
+        engine, the validation layer, auth, email delivery and the design system &mdash; end to end.
+      </p>
+      <ol class="numbered mt-8 rise rise-4">
+        <li><span class="ord">01</span><span class="txt">[Prior company or role]</span></li>
+        <li><span class="ord">02</span><span class="txt">[Relevant domain experience]</span></li>
+        <li><span class="ord">03</span><span class="txt">[Previous products shipped]</span></li>
+      </ol>
+      <p class="note mt-5 rise rise-5">Background to be filled in before sending.</p>
+    </div>
+  </section>
+
+  <!-- 12 · THE ASK -->
+  <section class="slide">
+    <div class="col">
+      <div class="rule-ink rise rise-1">
+        <p class="eyebrow">The ask</p>
+      </div>
+      <h2 class="statement rise rise-2">$100,000</h2>
+      <div class="mt-10 rise rise-3">
+        <div class="ledger-row">
+          <span class="ledger-label">Distribution &mdash; get briefs into founders&rsquo; inboxes</span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value">60%</span>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-label">Integrations &mdash; the next four data sources</span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value">25%</span>
+        </div>
+        <div class="ledger-row">
+          <span class="ledger-label">Infrastructure and inference</span>
+          <span class="ledger-leader" aria-hidden="true"></span>
+          <span class="ledger-value">15%</span>
+        </div>
+      </div>
+      <p class="closing mt-10 rise rise-4">
+        The goal of this money is one number: founders who open the brief tomorrow,
+        and the day after that.
+      </p>
+      <p class="meta mt-8 rise rise-5">Micah Okoko · micahokoko@gmail.com</p>
+    </div>
+  </section>
+
+</main>
+
+<div class="footer">
+  <span id="label">Founder Brief · Seed</span>
+  <span class="nav">
+    <button id="prev" aria-label="Previous slide">&larr; Prev</button>
+    <button id="next" aria-label="Next slide">Next &rarr;</button>
+    <span id="counter">1 / 12</span>
+  </span>
+</div>
+
+<script>
+(function(){
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var i = 0;
+  var counter = document.getElementById('counter');
+  var prev = document.getElementById('prev');
+  var next = document.getElementById('next');
+
+  function show(n){
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function(s, k){ s.classList.toggle('is-active', k === i); });
+    counter.textContent = (i + 1) + ' / ' + slides.length;
+    prev.disabled = i === 0;
+    next.disabled = i === slides.length - 1;
+    if (location.hash !== '#' + (i + 1)) history.replaceState(null, '', '#' + (i + 1));
+  }
+
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); show(i + 1); }
+    if (e.key === 'ArrowLeft'  || e.key === 'PageUp')                   { e.preventDefault(); show(i - 1); }
+    if (e.key === 'Home') show(0);
+    if (e.key === 'End')  show(slides.length - 1);
+  });
+
+  next.addEventListener('click', function(){ show(i + 1); });
+  prev.addEventListener('click', function(){ show(i - 1); });
+
+  document.getElementById('deck').addEventListener('click', function(e){
+    if (e.target.closest('button')) return;
+    show(i + (e.clientX > window.innerWidth / 2 ? 1 : -1));
+  });
+
+  var x0 = null;
+  document.addEventListener('touchstart', function(e){ x0 = e.touches[0].clientX; }, {passive:true});
+  document.addEventListener('touchend', function(e){
+    if (x0 === null) return;
+    var dx = e.changedTouches[0].clientX - x0;
+    if (Math.abs(dx) > 50) show(i + (dx < 0 ? 1 : -1));
+    x0 = null;
+  }, {passive:true});
+
+  var start = parseInt((location.hash || '').replace('#',''), 10);
+  show(isNaN(start) ? 0 : start - 1);
+})();
+</script>
+</body>
+</html>

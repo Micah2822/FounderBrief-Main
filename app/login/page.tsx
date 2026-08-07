@@ -4,6 +4,14 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
+// Supabase's OTP length is a project setting, not a constant — it can be any
+// value from 6 to 10 digits, and this project currently issues 8. Do not
+// hardcode a length: truncating the code produces a token that Supabase
+// rejects as "expired or invalid", which looks like a server problem and is
+// almost impossible to diagnose from the error alone.
+const MIN_CODE = 6;
+const MAX_CODE = 10;
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -105,7 +113,7 @@ export default function LoginPage() {
           ) : (
             <form onSubmit={verifyCode} className="space-y-3">
               <p className="text-[14px] text-muted">
-                We sent a 6-digit code to{" "}
+                We sent a sign-in code to{" "}
                 <span className="text-ink">{email}</span>.
               </p>
               <input
@@ -115,16 +123,15 @@ export default function LoginPage() {
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 pattern="[0-9]*"
-                maxLength={6}
+                maxLength={MAX_CODE}
                 value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                placeholder="000000"
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, MAX_CODE))}
                 className="field font-mono tracking-[0.4em] text-center"
-                aria-label="Six-digit sign-in code"
+                aria-label="Sign-in code"
               />
               <button
                 type="submit"
-                disabled={busy || code.length < 6}
+                disabled={busy || code.length < MIN_CODE}
                 className="btn-primary w-full"
               >
                 {busy ? "Verifying…" : "Sign in"}

@@ -49,7 +49,7 @@ Real values go in `.env.local`, which `.gitignore` covers via `.env*.local`.
 3. Auth → Providers → enable **Email**.
 4. Auth → Email Templates — **required, sign-in is broken without it.**
 
-   Sign-in is a 6-digit code, not a link. Supabase decides which to send by
+   Sign-in is an emailed code, not a link. Supabase decides which to send by
    what the template contains: `{{ .ConfirmationURL }}` sends a link,
    `{{ .Token }}` sends a code. Edit **both** the *Magic Link* and *Confirm
    sign up* templates to use the code — the first is used for returning users,
