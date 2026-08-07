@@ -43,38 +43,65 @@ Real values go in `.env.local`, which `.gitignore` covers via `.env*.local`.
    - **Automatically expose new tables**: OFF (new tables stay private
      until you deliberately grant access).
    - **Enable automatic RLS**: ON (new tables get RLS on from creation).
-2. Run `supabase/migrations/0001_init.sql` in the SQL editor.
-3. Auth → Providers → enable **Email**. No config needed; this powers the
-   magic-link sign-in.
-4. Auth → URL Configuration:
+2. Run the files in `supabase/migrations/` in the SQL editor, in filename
+   order. `0002` installs a trigger on `auth.users`, so run it from the SQL
+   editor (which has the privileges) rather than from a client.
+3. Auth → Providers → enable **Email**.
+4. Auth → Email Templates — **required, sign-in is broken without it.**
+
+   Sign-in is a 6-digit code, not a link. Supabase decides which to send by
+   what the template contains: `{{ .ConfirmationURL }}` sends a link,
+   `{{ .Token }}` sends a code. Edit **both** the *Magic Link* and *Confirm
+   sign up* templates to use the code — the first is used for returning users,
+   the second for someone signing in for the very first time, and missing
+   either one breaks that half of your users:
+
+   ```html
+   <h2>Your sign-in code</h2>
+   <p>Enter this code to sign in. It expires shortly.</p>
+   <p style="font-size:24px;letter-spacing:4px"><strong>{{ .Token }}</strong></p>
+   ```
+
+   Codes are what dodge the prefetch problem: corporate mail scanners
+   (Outlook Safe Links and similar) follow links in incoming mail, which
+   consumes a one-time `ConfirmationURL` before the user ever clicks it and
+   greets them with "Token has expired or is invalid". A code can't be
+   consumed by being read. Note this is why the two cannot be offered side by
+   side — a link and a code in the same email share one token, so a scanner
+   burning the link kills the code too.
+5. Auth → Providers → Email → **Email OTP Expiration** — the default is fine;
+   Supabase caps it at 24h to limit brute-force time.
+6. Auth → URL Configuration:
    - **Site URL** — a single value, set it to **production**
-     (`https://YOURAPP`). Magic-link emails resolve against this, so pointing
-     it at localhost would send every production sign-in link to localhost.
-   - **Redirect URLs** — an allowlist, add **both**:
-     `https://YOURAPP/auth/callback` and `http://localhost:3000/auth/callback`.
-5. Settings → API → copy the project URL, `anon` key, and `service_role` key
+     (`https://YOURAPP`).
+   - **Redirect URLs** — an allowlist; add `https://YOURAPP/auth/callback` and
+     `http://localhost:3000/auth/callback`. The code flow doesn't redirect, but
+     `app/auth/callback/route.ts` is kept as a fallback for the case where a
+     template still holds `{{ .ConfirmationURL }}`, and it needs these to work.
+7. Settings → API → copy the project URL, `anon` key, and `service_role` key
    into `.env.local`.
 
-### 2. GitHub OAuth Apps (two, plus one for local dev)
+### 2. GitHub OAuth App (one, plus one for local dev)
 
-Two, because a GitHub OAuth App has only **one** Authorization callback URL,
-and these two flows land on different hosts — sign-in goes to Supabase, the
-data integration goes to your own server. That one-callback limit is also why
-the integration app needs a local-dev twin (see App B).
+GitHub is a **data source, not a sign-in method** — the only way into the app
+is an emailed sign-in code. So there is one OAuth App, used during onboarding
+to read repos. A GitHub OAuth App has only **one** Authorization callback URL
+and this one points at your own server, which is why dev and prod need
+separate apps.
 
-**First: create a GitHub Organization to own them.**
+**First: create a GitHub Organization to own it.**
 
 An OAuth App registered under a personal account shows *your personal handle
-and avatar* as the publisher on the consent screen every user sees at sign-up.
-An org shows the product's name instead, and can later apply for publisher
-verification (which removes the "unverified app" notice).
+and avatar* as the publisher on the consent screen every user sees when they
+connect GitHub. An org shows the product's name instead, and can later apply
+for publisher verification (which removes the "unverified app" notice).
 
 This is not a second GitHub account — from your existing one, go to Settings →
 Organizations → **New organization** (free plan). You become its owner; your
 personal repos stay personal.
 
 1. **Organization name** — this is public and is what users see when they
-   authorize. Use the product name, e.g. `founderbrief`.
+   connect GitHub. Use the product name, e.g. `founderbrief`.
 2. **Contact email** (required) — used by GitHub for billing and account
    notices. It is not published on the org profile; the profile's public email
    is a separate, optional field.
@@ -86,35 +113,16 @@ personal repos stay personal.
    membership reads **Private**. This keeps your personal account off the org's
    public members list — the last place it would otherwise be linked.
 
-Then register both apps below **under the org** (the New OAuth App form has an
+Then register the app below **under the org** (the New OAuth App form has an
 Owner dropdown — pick the org, not yourself).
 
-> Already made them under your personal account? App settings → Transfer
+> Already made it under your personal account? App settings → Transfer
 > ownership. The Client ID and Secret survive the move, so nothing breaks and
 > connected users don't need to re-authorize.
 
-**App A — sign-in** (credentials go to *Supabase*)
+**The app** (credentials go to `.env.local`)
 
-1. In Supabase: Auth → Providers → **GitHub**. Copy the **Callback URL (for
-   OAuth)** shown there — `https://<project-ref>.supabase.co/auth/v1/callback`.
-   Keep the tab open.
-2. GitHub → Settings → Developer settings → OAuth Apps → **New OAuth App**
-   - Application name: `Founder Brief — Sign in`
-   - Homepage URL: `https://YOURAPP`
-   - Authorization callback URL: **paste the Supabase URL from step 1**
-   - Register application
-
-   This app needs no dev/prod split: the callback points at Supabase, which is
-   the same host in both environments.
-3. Copy the **Client ID**, then **Generate a new client secret** and copy it.
-4. Back in the Supabase GitHub tab: paste both, leave **Allow users without an
-   email** OFF (briefs are delivered by email), toggle **GitHub enabled** ON,
-   and Save.
-
-**App B — data integration** (credentials go to `.env.local`)
-
-1. GitHub → Developer settings → OAuth Apps → **New OAuth App** (a second,
-   separate app)
+1. GitHub → Settings → Developer settings → OAuth Apps → **New OAuth App**
    - Application name: `Founder Brief — GitHub data`
    - Homepage URL: `https://YOURAPP`
    - Authorization callback URL:
@@ -123,11 +131,16 @@ Owner dropdown — pick the org, not yourself).
 2. Copy the Client ID and generate a secret.
 3. Put them in `.env.local` as `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`.
 
-Unlike App A, this callback points at *your* server, so dev and prod differ.
-Since one OAuth App allows only one callback URL, register a **third** app for
+Since one OAuth App allows only one callback URL, register a **second** app for
 local development — identical, but with callback
 `http://localhost:3000/api/integrations/github/callback` — and use its
 credentials in your local `.env.local`, keeping the production pair for Vercel.
+
+`NEXT_PUBLIC_APP_URL` must match the registered callback's host **exactly** —
+apex vs `www` counts as a mismatch, and GitHub rejects the handshake with a
+redirect URI error. If it is unset the code falls back to the request origin,
+which on Vercel can be the `*.vercel.app` deployment host rather than your
+domain. For the same reason, preview deployments cannot complete this flow.
 
 These live in `.env.local` rather than Supabase because your Next.js server
 runs this handshake itself (`app/api/integrations/github/authorize/route.ts`),
@@ -167,8 +180,10 @@ npm run dev
 2. Add all env vars (set `NEXT_PUBLIC_APP_URL` to the production URL and
    `CRON_SECRET` to a random string — `openssl rand -base64 32`).
 3. Once you know the production domain, replace `YOURAPP` in the three places
-   that hardcode it: Supabase **Site URL**, Supabase **Redirect URLs**, and
-   GitHub **App B**'s Authorization callback URL.
+   that hardcode it: Supabase **Site URL**, Supabase **Redirect URLs**, and the
+   GitHub OAuth App's Authorization callback URL. All three must use the same
+   host you set in `NEXT_PUBLIC_APP_URL` — pick apex or `www` and redirect the
+   other to it.
 
 **Scheduling the brief.** `/api/cron/hourly` must run every hour: each run
 serves only the users whose local time has just reached their send hour

@@ -1,35 +1,75 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [code, setCode] = useState("");
+  const [step, setStep] = useState<"email" | "code">("email");
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function signInWithGitHub() {
+  async function sendCode(e?: React.FormEvent) {
+    e?.preventDefault();
     setBusy(true);
+    setError(null);
+    setNotice(null);
     const supabase = createClient();
-    await supabase.auth.signInWithOAuth({
-      provider: "github",
-      options: { redirectTo: `${location.origin}/auth/callback` },
-    });
+    const { error } = await supabase.auth.signInWithOtp({ email });
+    setBusy(false);
+    if (error) {
+      setError(error.message);
+      return false;
+    }
+    setStep("code");
+    return true;
   }
 
-  async function sendMagicLink(e: React.FormEvent) {
+  async function verifyCode(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${location.origin}/auth/callback` },
-    });
-    setBusy(false);
-    if (error) setError(error.message);
-    else setSent(true);
+    const token = code.replace(/\D/g, "");
+
+    // A code from a first-ever sign-in is issued against the signup template
+    // and may not verify as type "email", so fall back rather than dead-end a
+    // brand new user on their first attempt.
+    let { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
+    if (error) {
+      ({ error } = await supabase.auth.verifyOtp({ email, token, type: "signup" }));
+    }
+
+    if (error) {
+      setBusy(false);
+      setCode("");
+      setError(
+        error.message.toLowerCase().includes("expired")
+          ? "That code has expired. Send a new one."
+          : "That code isn't right. Check the email and try again."
+      );
+      return;
+    }
+
+    // Where to land is decided by the server: /  redirects to /onboarding
+    // when no tools are connected yet.
+    router.replace("/");
+    router.refresh();
+  }
+
+  function startOver() {
+    setStep("email");
+    setCode("");
+    setError(null);
+    setNotice(null);
+  }
+
+  async function resend() {
+    if (await sendCode()) setNotice("Sent a new code.");
   }
 
   return (
@@ -49,40 +89,65 @@ export default function LoginPage() {
         </div>
 
         <div className="mt-10 space-y-3 rise rise-2">
-          <button onClick={signInWithGitHub} disabled={busy} className="btn-primary w-full">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
-              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
-            </svg>
-            Continue with GitHub
-          </button>
-
-          <div className="flex items-center gap-3 py-1">
-            <div className="flex-1 border-t border-line" />
-            <span className="font-mono text-[10px] uppercase tracking-widest text-faint">or</span>
-            <div className="flex-1 border-t border-line" />
-          </div>
-
-          {sent ? (
-            <p className="text-[14px] text-muted border border-line rounded-md px-4 py-3">
-              Check your inbox — the sign-in link is on its way to{" "}
-              <span className="text-ink">{email}</span>.
-            </p>
-          ) : (
-            <form onSubmit={sendMagicLink} className="space-y-3">
+          {step === "email" ? (
+            <form onSubmit={sendCode} className="space-y-3">
               <input
                 type="email"
                 required
+                autoFocus
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@yourstartup.com"
                 className="field"
                 aria-label="Email address"
               />
-              <button type="submit" disabled={busy || !email} className="btn-ghost w-full">
-                Email me a sign-in link
+              <button type="submit" disabled={busy || !email} className="btn-primary w-full">
+                {busy ? "Sending…" : "Email me a sign-in code"}
               </button>
             </form>
+          ) : (
+            <form onSubmit={verifyCode} className="space-y-3">
+              <p className="text-[14px] text-muted">
+                We sent a 6-digit code to{" "}
+                <span className="text-ink">{email}</span>.
+              </p>
+              <input
+                type="text"
+                required
+                autoFocus
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                pattern="[0-9]*"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="000000"
+                className="field font-mono tracking-[0.4em] text-center"
+                aria-label="Six-digit sign-in code"
+              />
+              <button
+                type="submit"
+                disabled={busy || code.length < 6}
+                className="btn-primary w-full"
+              >
+                {busy ? "Verifying…" : "Sign in"}
+              </button>
+              <div className="flex items-center justify-between font-mono text-[11px] text-muted pt-1">
+                <button type="button" onClick={startOver} className="hover:text-ink transition-colors">
+                  ← Use a different email
+                </button>
+                <button
+                  type="button"
+                  onClick={resend}
+                  disabled={busy}
+                  className="hover:text-ink transition-colors disabled:opacity-50"
+                >
+                  Resend code
+                </button>
+              </div>
+            </form>
           )}
+          {notice && <p className="text-[13px] text-muted">{notice}</p>}
           {error && <p className="text-[13px] text-oxide">{error}</p>}
         </div>
       </div>
