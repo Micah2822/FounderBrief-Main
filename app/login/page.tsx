@@ -36,22 +36,19 @@ export default function LoginPage() {
     const supabase = createClient();
     const token = code.replace(/\D/g, "");
 
-    // A code from a first-ever sign-in is issued against the signup template
-    // and may not verify as type "email", so fall back rather than dead-end a
-    // brand new user on their first attempt.
-    let { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
-    if (error) {
-      ({ error } = await supabase.auth.verifyOtp({ email, token, type: "signup" }));
-    }
+    // type "email" covers both a first-ever sign-in and a returning one. Do
+    // not retry with another type on failure: a failed attempt can invalidate
+    // the token, so a speculative second call turns a recoverable typo into a
+    // dead code.
+    const { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
 
     if (error) {
       setBusy(false);
       setCode("");
-      setError(
-        error.message.toLowerCase().includes("expired")
-          ? "That code has expired. Send a new one."
-          : "That code isn't right. Check the email and try again."
-      );
+      // Supabase returns one message, "Token has expired or is invalid", for
+      // both cases — so don't claim it expired, which sends people off to
+      // request a new code when the real cause was a typo.
+      setError(`${error.message}. Check the code, or send a new one.`);
       return;
     }
 
