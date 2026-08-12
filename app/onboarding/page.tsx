@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { OnboardingFlow } from "@/components/OnboardingFlow";
+import { Wordmark } from "@/components/Wordmark";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +43,9 @@ export default async function OnboardingPage({
 
   return (
     <main className="mx-auto max-w-[640px] px-6 py-14">
-      <p className="eyebrow border-t-2 border-ink pt-3">Founder Brief · Setup</p>
+      <p className="eyebrow border-t-2 border-ink pt-3">
+        <Wordmark suffix="Setup" />
+      </p>
       {connectError && (
         <p className="text-[13px] text-oxide leading-relaxed border border-line rounded-md px-4 py-3 mt-6">
           {connectError}

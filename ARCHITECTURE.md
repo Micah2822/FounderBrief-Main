@@ -30,10 +30,15 @@ accepts input or reaches an LLM.
 These are the product, not preferences. Breaking one is a bug even if tests pass.
 
 1. **Every number is computed, never generated.** The deterministic engine in
-   `lib/brief/diff.ts` originates all figures. The LLM only rephrases. Enforced
-   at runtime by `numbersAreGrounded()` against the `allowedNumbers()` allowlist
-   — if the model emits a digit sequence that isn't in the facts, the whole
-   response is discarded and the deterministic baseline ships instead.
+   `lib/brief/diff.ts` originates all figures. Enforced at runtime by
+   `numbersAreGrounded()` against the `allowedNumbers()` allowlist — if the model
+   emits a digit sequence that isn't in the facts, the whole response is
+   discarded and the deterministic baseline ships instead.
+   **Numbers are the only part enforced.** When `polishWithLLM` succeeds, its
+   `priorities` array replaces the baseline wholesale and nothing compares the
+   two — the model may reorder, drop, or introduce a recommendation the scorer
+   never proposed. That latitude is intentional, but it is steered by the prompt,
+   not guaranteed by code. Don't treat it as a constraint you can build on.
 2. **The deterministic path must always be able to ship alone.** `OPENAI_API_KEY`
    may be absent, and `polishWithLLM` gives up after two attempts. Whatever
    `baselineInsight()` and `baselinePriorities()` produce is what a founder
@@ -82,6 +87,7 @@ app/
   login/                      Email OTP sign-in (client-side verify, not a redirect flow)
   onboarding/                 Server shell → <OnboardingFlow/>
   settings/  preview/  privacy/  terms/
+  icon.svg  icon1.png  apple-icon.png   Favicon set (Next metadata-file convention)
   api/
     cron/hourly/              Scheduled generate + email. Bearer-auth, timingSafeEqual
     brief/generate/           Manual generation. 30s/user throttle, completes onboarding
@@ -99,7 +105,9 @@ lib/
   crypto.ts  dates.ts  types.ts  sample.ts
 components/
   BriefView.tsx               The brief, on the web
+  Wordmark.tsx                Masthead mark + name; the link home on every page
   Landing.tsx  OnboardingFlow.tsx  SettingsForm.tsx  Chat.tsx
+scripts/generate-icons.mjs    Regenerates the favicon PNGs from app/icon.svg
 supabase/migrations/          Sequential SQL, applied by hand
 .github/workflows/            hourly-brief.yml — the real brief schedule (see below)
 middleware.ts                 Session refresh + route gating
@@ -208,16 +216,18 @@ carries meaning, so anything that reorders this array changes the product.
 
 Each rule builds a `Candidate { text, score, kind }`:
 
-| Signal | Score | `kind` |
-|---|---|---|
-| Funnel break — traffic up >20% w/w while signups flat or down | 100 | growth |
-| Signup stall — zero signups today *and* yesterday | 85 | growth |
-| Ship drought — `days_since_last_ship >= 3` | 80 | shipping |
-| Warm channel — yesterday's spike had a dominant non-direct source | 70 | growth |
-| Talk to yesterday's new signups | 60 | growth |
-| Stale open PR — oldest open PR ≥ 2 days | 55 | shipping |
-| Fresh open PR | 30 | shipping |
-| Generic fallback — "pick the one thing…" | 5 | none |
+| Signal | Score | `kind` | Source |
+|---|---|---|---|
+| Funnel break — traffic up >20% w/w while signups flat or down | 100 | growth | traffic + product |
+| **First revenue** — money today, none yesterday *and* none last week | 90 | growth | revenue |
+| Signup stall — zero signups today *and* yesterday | 85 | growth | product |
+| Ship drought — `days_since_last_ship >= 3` | 80 | shipping | github |
+| Warm channel — yesterday's spike had a dominant non-direct source | 70 | growth | traffic |
+| **Talk to yesterday's new paying customers** | 65 | growth | revenue |
+| Talk to yesterday's new signups | 60 | growth | product |
+| Stale open PR — oldest open PR ≥ 2 days | 55 | shipping | github |
+| Fresh open PR | 30 | shipping | github |
+| Generic fallback — "pick the one thing…" | 5 | none | — |
 
 Then: **sort desc → keep `score >= PRIORITY_FLOOR` (25) → cap 3.** If nothing
 clears the floor, return exactly the top scorer. Never zero, never four.
@@ -226,15 +236,58 @@ The floor sits just under the weakest real signal (fresh PR, 30) so the generic
 fallback can never ride along beside a concrete instruction. On a quiet day the
 brief says one true thing and stops.
 
+**Why the two revenue rules sit where they do.** First revenue is the rarest
+signal a brief can carry and the one most worth acting on the same day, while
+the cause is still identifiable — but it ranks *below* a funnel break, because a
+leaking funnel caps everything that follows it. Talking to a paying customer
+outranks talking to a free signup by one notch: a payer has already answered the
+question a signup only hints at. Note the asymmetry these rules removed —
+`baselineInsight()` had handled revenue since Stripe shipped, so revenue could
+reach the ledger and the insight but **never the todo list**.
+
 **Goal bonus.** `goalBonus()` adds `GOAL_BONUS` (15) when the founder's
 `goal` text matches a `GOAL_THEMES` pattern whose `kinds` include the
 candidate's `kind`. This is the **only** place `goal` reaches the deterministic
 path — everywhere else it merely tints the LLM's prose. It reorders candidates
 the facts already justify and can never introduce one.
 
+One consequence worth knowing: `GOAL_THEMES` maps revenue words
+(`/revenue|paying|money|mrr|monet|sales|charge|pricing/`) to `growth`, and both
+revenue rules are `growth`. A founder whose stated goal mentions revenue
+therefore lifts first-revenue to **105 — above the funnel break**. That is
+intended, but it is the only way any rule outranks the 100.
+
 When adding a signal: give it a score relative to this table, a `kind`, and use
 the local `add()` helper so the goal bonus applies. Then re-check the quiet-day
 case — that a slow morning still yields exactly one instruction.
+
+### Worked example
+
+Four scenarios against the same base facts (412 visitors with Twitter dominant,
+31 signups, one 3-day-old open PR, shipped yesterday). Produced by calling
+`baselinePriorities()` directly — the fastest way to check a scoring change, per
+[Known issues](#known-issues-and-footguns).
+
+| Facts | Ranked output |
+|---|---|
+| Revenue rising ($348, up $108 — *not* first money) | 1. Warm channel (70) · 2. Paying customers (65) · 3. New signups (60) |
+| First revenue this week ($348, nothing prior) | 1. **First revenue (90)** · 2. Warm channel (70) · 3. Paying customers (65) |
+| No Stripe connected | 1. Warm channel (70) · 2. New signups (60) · 3. Stale PR (55) |
+| One new customer, no traffic/github | 1. Paying customers (65) · 2. New signups (60) |
+
+Two things this pins down. There is **no rule for revenue merely rising** — only
+first money scores. On a growing-revenue day the sole revenue candidate is the
+payer rule at 65, which the warm channel outranks, and that is the right
+outcome: the channel is what caused the revenue. Add a rising-revenue rule only
+if you want revenue to lead most days a founder has Stripe connected.
+
+Second, the stale PR (55) drops off the sample day entirely once the payer rule
+(65) exists — three slots, and it is now fourth. Adding a mid-scoring rule
+silently evicts the weakest existing one; check what falls off, not just what
+appears.
+
+The last row is also why the payer rule carries a separate singular string. The
+plural form renders "one of yesterday's 1 new paying customer" at `n = 1`.
 
 ---
 
@@ -255,8 +308,48 @@ made in both, or they drift.** The lead-priority block is the current example:
 a flat array is deliberate — briefs stored before ranking existed still render,
 with their first item becoming the lead.
 
+### The masthead
+
+`components/Wordmark.tsx` is the mark-plus-name used by all seven web mastheads
+(brief, landing, home, login, onboarding, settings, privacy, terms). It always
+links to `/`, which resolves to the landing page logged-out and today's brief
+logged-in — so one `href` is correct everywhere and no caller decides.
+
+The mark is **inline SVG in `currentColor`**, not an image. It inherits whatever
+theme token it sits in, so it inverts with light/dark through the same
+`prefers-color-scheme` block in `globals.css` that drives everything else. There
+is no second asset and no image swap; do not add one.
+
+Two deliberate exceptions:
+
+- **`<Wordmark linked={false}/>`**, via `BriefView`'s `sample` prop, for the
+  specimen brief embedded on the landing page. That page owns its own masthead,
+  so a linked one inside the specimen would be a duplicate home link and would
+  turn an illustration into navigation. `/preview` is a real page and *does*
+  link.
+- **The email masthead has no mark.** `renderBriefEmail()` keeps plain text,
+  because inline SVG is stripped by most clients and a remote image would be
+  blocked by default. This is a divergence on purpose — see the drift warning
+  above — not an oversight to "fix".
+
+The favicon is a separate, unrelated asset: `app/icon.svg` keeps a black plate
+and does **not** track the theme, because it is drawn on browser chrome and in
+search results rather than on the page. `icon1.png` / `apple-icon.png` are its
+raster fallbacks, regenerated by `scripts/generate-icons.mjs`.
+
+### The sample brief
+
 `lib/sample.ts` feeds the landing page and `/preview` with fake-but-honest data,
-and doubles as the design reference.
+and doubles as the design reference. It models a founder with **all four
+integrations connected** — including Stripe, so the ledger carries `Revenue` and
+`New customers` and the gaps footer is empty.
+
+Keep it reproducible by the engine. Its rows must match what `buildLedger()`
+emits for those facts (revenue between signups and shipping; `New customers`
+carrying no delta) and its priorities must be ones `baselinePriorities()` could
+rank. It previously showed `"Stripe isn't connected — revenue isn't being
+tracked."` — a string `findGaps()` cannot actually produce, advertising a
+limitation the product does not have.
 
 ---
 
@@ -364,9 +457,12 @@ error alerting for exactly this reason.
 changing the `Brief` shape can break the marketing site, not just the app.
 
 **No tests.** `npx tsc --noEmit` is the only gate. For pure functions like
-`baselinePriorities`, compiling the single file with `tsc` and driving it from a
-throwaway Node script is the fastest way to verify behaviour — the type-only
-import of `@/lib/types` errors but still emits usable JS.
+`baselinePriorities`, the fastest way to verify behaviour is a throwaway script
+run with `npx tsx --tsconfig tsconfig.json <file>.ts` — tsx resolves the `@/`
+alias from `tsconfig.json`, so the script imports the real module directly and no
+compile step or hand-built JS is involved. Drive it with a base facts object and
+spread overrides per scenario; the [worked example](#worked-example) above is
+that script's output.
 
 ---
 
@@ -377,8 +473,12 @@ Update this doc in the same change as the code when you:
 - add or remove a **table, column, or migration** → Data model
 - add or remove a **collector / provider** → Collectors, Directory map
 - change **priority signals, scores, the floor, or the cap** → the score table
+  **and** the worked example, which is the only place the interactions are visible
 - change what a **brief contains or how it's laid out** → Rendering (and confirm
   both surfaces were changed)
+- change the **masthead, the mark, or the favicon** → Rendering › The masthead
+- change **`lib/sample.ts`** → re-check it against `buildLedger()` and
+  `baselinePriorities()`; a demo the engine can't reproduce is a false claim
 - change the **pipeline order**, the partial-brief rule, or LLM validation → the
   pipeline section and Invariants
 - change **auth, RLS, grants, encryption, or rate limits** → Auth and security

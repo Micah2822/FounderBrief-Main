@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Newsreader, Inter, IBM_Plex_Mono } from "next/font/google";
+import { appUrl, SITE_NAME, SITE_TITLE, SITE_DESCRIPTION } from "@/lib/seo";
 import "./globals.css";
 
 const serif = Newsreader({
@@ -16,9 +17,28 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Founder Brief",
-  description:
-    "What happened in your startup yesterday, and what to focus on today. A daily brief for early-stage founders.",
+  // Without metadataBase, Next resolves OG/Twitter image URLs against localhost
+  // and warns at build. Every absolute URL in the head derives from this.
+  metadataBase: new URL(appUrl),
+  title: {
+    default: SITE_TITLE,
+    // Sub-pages set a bare title ("Privacy") and inherit the suffix, so the
+    // brand can be renamed in one place.
+    template: `%s — ${SITE_NAME}`,
+  },
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  openGraph: {
+    type: "website",
+    siteName: SITE_NAME,
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

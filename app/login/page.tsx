@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { Wordmark } from "@/components/Wordmark";
 
 // Supabase's OTP length is a project setting, not a constant — it can be any
 // value from 6 to 10 digits, and this project currently issues 8. Do not
@@ -81,7 +82,9 @@ export default function LoginPage() {
     <main className="min-h-screen flex items-center justify-center px-6">
       <div className="w-full max-w-sm">
         <div className="rise">
-          <p className="eyebrow border-t-2 border-ink pt-3">Founder Brief</p>
+          <p className="eyebrow border-t-2 border-ink pt-3">
+            <Wordmark />
+          </p>
           <h1 className="font-serif text-[30px] sm:text-[34px] leading-tight mt-8">
             Your startup, every{" "}
             <br className="hidden sm:block" />

@@ -1,13 +1,26 @@
 import type { Brief } from "@/lib/types";
 import { formatBriefDate } from "@/lib/dates";
+import { Wordmark } from "@/components/Wordmark";
 
-export function BriefView({ brief, greeting }: { brief: Brief; greeting: string }) {
+export function BriefView({
+  brief,
+  greeting,
+  // Set when the brief is rendered as a specimen inside another page. The
+  // masthead then stays inert: the surrounding page owns navigation, and a
+  // second link home would be both a duplicate and a promise this box can't
+  // keep — it is an illustration, not the reader's own brief.
+  sample = false,
+}: {
+  brief: Brief;
+  greeting: string;
+  sample?: boolean;
+}) {
   return (
     <article>
       {/* Wire-dispatch header */}
       <header className="rise border-t-2 border-ink">
         <p className="eyebrow flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-line py-[10px]">
-          <span>Founder Brief</span>
+          <Wordmark linked={!sample} />
           {/* The date is the period the brief covers, not the day it was
               issued — a masthead reads as an issue date unless it says
               otherwise, which is exactly how it gets misread. */}

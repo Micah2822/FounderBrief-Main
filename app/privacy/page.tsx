@@ -1,12 +1,13 @@
 import Link from "next/link";
+import { Wordmark } from "@/components/Wordmark";
 
-export const metadata = { title: "Privacy — Founder Brief" };
+export const metadata = { title: "Privacy" };
 
 export default function PrivacyPage() {
   return (
     <main className="mx-auto max-w-[640px] px-6 py-14">
       <p className="eyebrow border-t-2 border-ink pt-3 flex justify-between">
-        <span>Founder Brief · Privacy</span>
+        <Wordmark suffix="Privacy" />
         <Link href="/" className="hover:text-ink transition-colors">
           ← Home
         </Link>

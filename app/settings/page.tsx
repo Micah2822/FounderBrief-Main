@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { SettingsForm } from "@/components/SettingsForm";
+import { Wordmark } from "@/components/Wordmark";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export default async function SettingsPage() {
   return (
     <main className="mx-auto max-w-[640px] px-6 py-14">
       <p className="eyebrow border-t-2 border-ink pt-3 flex justify-between">
-        <span>Founder Brief · Settings</span>
+        <Wordmark suffix="Settings" />
         <Link href="/" className="hover:text-ink transition-colors normal-case tracking-normal">
           ← Back to brief
         </Link>

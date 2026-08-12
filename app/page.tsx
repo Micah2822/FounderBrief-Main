@@ -7,6 +7,7 @@ import { Landing } from "@/components/Landing";
 import { Chat } from "@/components/Chat";
 import { GenerateButton } from "@/components/GenerateButton";
 import { RefreshBrief } from "@/components/RefreshBrief";
+import { Wordmark } from "@/components/Wordmark";
 import { localHour } from "@/lib/dates";
 import type { Brief } from "@/lib/types";
 
@@ -82,7 +83,9 @@ export default async function Home({
         <BriefView brief={brief} greeting={greetingFor(tz)} />
       ) : (
         <div className="rise">
-          <p className="eyebrow border-t-2 border-ink pt-3">Founder Brief</p>
+          <p className="eyebrow border-t-2 border-ink pt-3">
+            <Wordmark />
+          </p>
           <h1 className="font-serif text-[34px] leading-tight mt-10">
             Your first brief is one click away.
           </h1>

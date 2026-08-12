@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { BriefView } from "@/components/BriefView";
 import { SAMPLE_BRIEF } from "@/lib/sample";
+import { Wordmark } from "@/components/Wordmark";
 
 // The logged-out homepage. One column, same dispatch voice as the product —
 // the landing page IS a demo of the product.
@@ -11,7 +12,7 @@ export function Landing() {
       {/* Hero */}
       <header className="rise border-t-2 border-ink">
         <p className="eyebrow flex items-baseline justify-between border-b border-line py-[10px]">
-          <span>Founder Brief</span>
+          <Wordmark />
           <Link href="/login" className="hover:text-ink transition-colors">
             Sign in
           </Link>
@@ -46,7 +47,7 @@ export function Landing() {
       <section className="rise rise-2 mt-20" aria-label="A sample brief">
         <p className="eyebrow mb-5">This lands in your inbox at 7am —</p>
         <div className="border border-line rounded-lg p-5 sm:p-9">
-          <BriefView brief={SAMPLE_BRIEF} greeting="Good morning." />
+          <BriefView brief={SAMPLE_BRIEF} greeting="Good morning." sample />
         </div>
       </section>
 

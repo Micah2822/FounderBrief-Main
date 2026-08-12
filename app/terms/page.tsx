@@ -1,12 +1,13 @@
 import Link from "next/link";
+import { Wordmark } from "@/components/Wordmark";
 
-export const metadata = { title: "Terms — Founder Brief" };
+export const metadata = { title: "Terms" };
 
 export default function TermsPage() {
   return (
     <main className="mx-auto max-w-[640px] px-6 py-14">
       <p className="eyebrow border-t-2 border-ink pt-3 flex justify-between">
-        <span>Founder Brief · Terms</span>
+        <Wordmark suffix="Terms" />
         <Link href="/" className="hover:text-ink transition-colors">
           ← Home
         </Link>
