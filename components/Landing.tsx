@@ -27,8 +27,9 @@ export function Landing() {
         </h1>
         <p className="text-muted text-[16px] leading-relaxed mt-5 max-w-[30rem]">
           Everything you need to know for your startup is already in your
-          tools — just scattered across five of them. Founder Brief reads them
-          all while you sleep, then tells you:{" "}
+          tools — just scattered across five of them.
+          <br />
+          Founder Brief reads your tools while you sleep then tells you:{" "}
           <em className="text-ink not-italic font-medium">
             what happened yesterday, and what should I focus on today?
           </em>

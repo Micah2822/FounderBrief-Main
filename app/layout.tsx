@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Newsreader, Inter, IBM_Plex_Mono } from "next/font/google";
-import { appUrl, SITE_NAME, SITE_TITLE, SITE_DESCRIPTION } from "@/lib/seo";
 import "./globals.css";
 
 const serif = Newsreader({
@@ -17,28 +16,15 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  // Without metadataBase, Next resolves OG/Twitter image URLs against localhost
-  // and warns at build. Every absolute URL in the head derives from this.
-  metadataBase: new URL(appUrl),
   title: {
-    default: SITE_TITLE,
-    // Sub-pages set a bare title ("Privacy") and inherit the suffix, so the
-    // brand can be renamed in one place.
-    template: `%s — ${SITE_NAME}`,
+    // The blue link in a Google result. Under 60 characters so it isn't cut off.
+    default: "Founder Brief | Your startup, every morning, in 30 seconds.",
+    // Sub-pages set a bare title ("Privacy") and inherit the suffix.
+    template: "%s | Founder Brief",
   },
-  description: SITE_DESCRIPTION,
-  applicationName: SITE_NAME,
-  openGraph: {
-    type: "website",
-    siteName: SITE_NAME,
-    title: SITE_TITLE,
-    description: SITE_DESCRIPTION,
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: SITE_TITLE,
-    description: SITE_DESCRIPTION,
-  },
+  // The grey subtext under it. ~150 characters is what Google will show.
+  description:
+    "A daily brief for early-stage founders. Reads your GitHub, Stripe, Supabase and analytics overnight, then tells you what happened and what to do today.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

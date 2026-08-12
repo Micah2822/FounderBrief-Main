@@ -109,23 +109,46 @@ with `<em class="not-italic">` — the colour shift carries the emphasis, not th
 
 ## 4. Signature components
 
-These four patterns are the brand. Reuse them verbatim; they are what makes a new page
+These five patterns are the brand. Reuse them verbatim; they are what makes a new page
 recognisable as Founder Brief.
 
 ### The masthead rule
 
 Every top-level page opens with a 2px `ink` rule, then an eyebrow row with a hairline
-beneath it. Left slot is always the words "Founder Brief"; right slot is context —
-issue number and date in the product, "Sign in" on the landing page.
+beneath it. Left slot is always the mark and the words "Founder Brief"; right slot is
+context — issue number and date in the product, "Sign in" on the landing page.
+
+Never hand-write the left slot. Use `<Wordmark/>` (`components/Wordmark.tsx`), which
+carries the mark, the name, the spacing and the link:
 
 ```html
 <header class="rise border-t-2 border-ink">
   <p class="eyebrow flex items-baseline justify-between border-b border-line py-[10px]">
-    <span>Founder Brief</span>
+    <Wordmark />
     <span>No. 42 · March 4, 2026</span>
   </p>
 </header>
 ```
+
+Pass `suffix` for a section — `<Wordmark suffix="Settings" />` renders
+"Founder Brief · Settings". **The masthead is always a link home**, on every page
+including the one you are on. The only exception is a specimen brief embedded in
+another page, which takes `linked={false}`.
+
+### The mark
+
+Three left-aligned bars in descending width — a dispatch reduced to its shape. It is
+the favicon's mark without its plate.
+
+- **Inline SVG in `currentColor`, never an image file.** It takes the token it sits
+  in, so it follows light/dark with no second asset and no swap. A PNG pair would
+  break the hover transition and the theme inheritance both.
+- **`faint` at rest, `ink` on hover**, matching the wordmark beside it.
+- **11px wide** beside the 11px eyebrow, with a `7px` gap and a `3px` top nudge so it
+  sits on the first line's cap height rather than floating between two wrapped lines.
+- Never enlarge it as a page element or set it on a filled plate. At display sizes
+  the mark stops reading as a logo and starts reading as a UI bar chart. The plated
+  version exists only as the favicon, where it sits on browser chrome.
 
 ### The eyebrow
 
@@ -250,6 +273,7 @@ at 640px, and use no more than five `.rise` steps.
 
 - Uses only the seven colour tokens; no hex literals outside `lib/email/`
 - Readable in both light and dark without a single `dark:` class
+- Opens with `<Wordmark/>` in the masthead, not hand-written text
 - One column, `max-w-[640px]`, no shadows
 - Every section has a mono uppercase eyebrow
 - All figures are mono, tabular, and right-aligned on a dotted leader

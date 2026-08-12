@@ -223,6 +223,7 @@ export function baselinePriorities(facts: Facts): string[] {
   const g = facts.github;
   const p = facts.product;
   const t = facts.traffic;
+  const r = facts.revenue;
 
   const add = (text: string, score: number, kind: PriorityKind) =>
     out.push({ text, score: score + goalBonus(kind, facts.founder_goal), kind });
@@ -240,6 +241,15 @@ export function baselinePriorities(facts: Facts): string[] {
     add("Do one distribution task today — signups have stalled.", 85, "growth");
   }
 
+  // First money is the rarest signal a brief can carry, and the one most worth
+  // acting on the same day — the cause is still fresh enough to identify and
+  // repeat. Scored above a signup stall, below a broken funnel: a funnel that
+  // leaks is still the bigger problem, because it caps everything that follows.
+  // Mirrors the matching case in baselineInsight.
+  if (r && r.gross_revenue > 0 && r.prev_day_revenue === 0 && r.prev_week_revenue === 0 && r.week_revenue === r.gross_revenue) {
+    add("Find out what caused your first revenue this week, and do it again.", 90, "growth");
+  }
+
   if (g && g.days_since_last_ship !== null && g.days_since_last_ship >= 3) {
     add("Ship something small today to break the drought.", 80, "shipping");
   }
@@ -254,6 +264,19 @@ export function baselinePriorities(facts: Facts): string[] {
     !/direct/i.test(top.source)
   ) {
     add(`Post again where yesterday's spike came from — ${top.source} drove ${top.visitors} visitors.`, 70, "growth");
+  }
+
+  // Ranked one notch above talking to a free signup: someone who paid has
+  // already answered the question a signup only hints at, so when both are
+  // available the payer is the better conversation.
+  if (r && r.new_customers > 0) {
+    add(
+      r.new_customers === 1
+        ? "Talk to yesterday's new paying customer — ask what tipped them over."
+        : `Talk to one of yesterday's ${r.new_customers} new paying customers — ask what tipped them over.`,
+      65,
+      "growth"
+    );
   }
 
   if (p && p.new_signups > 0) {

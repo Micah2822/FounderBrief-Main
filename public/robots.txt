@@ -1,0 +1,7 @@
+# Only the homepage is offered to crawlers.
+# "Allow: /$" matches the root and nothing else; the bare "Disallow: /" covers
+# everything below it, including /settings, /onboarding and /api. Google and
+# Bing resolve the overlap by longest match, so Allow wins for "/" alone.
+User-agent: *
+Allow: /$
+Disallow: /
