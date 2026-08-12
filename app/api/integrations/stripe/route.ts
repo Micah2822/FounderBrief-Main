@@ -5,10 +5,16 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { encrypt } from "@/lib/crypto";
 import { verifyStripe } from "@/lib/collectors/stripe";
 
+// Restricted keys only. A secret key (sk_) can create charges and issue
+// refunds; the brief needs nothing but reads, so accepting one would store far
+// more authority than the product ever exercises.
 const Schema = z.object({
   key: z
     .string()
-    .regex(/^(rk|sk)_(live|test)_[A-Za-z0-9]+$/, "That doesn't look like a Stripe API key"),
+    .regex(
+      /^rk_(live|test)_[A-Za-z0-9]+$/,
+      "That needs to be a restricted key (starts with rk_), not your secret key"
+    ),
 });
 
 export async function POST(request: Request) {
@@ -40,7 +46,9 @@ export async function POST(request: Request) {
       user_id: user.id,
       provider: "stripe",
       access_token: encrypt(key),
-      config: { mode: key.includes("_test_") ? "test" : "live", restricted: key.startsWith("rk_") },
+      // Always true now that the schema rejects sk_. Kept in config rather than
+      // dropped so Settings can still tell an old sk_ row apart from this one.
+      config: { mode: key.includes("_test_") ? "test" : "live", restricted: true },
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id,provider" }

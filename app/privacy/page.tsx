@@ -40,10 +40,18 @@ export default function PrivacyPage() {
         <section>
           <p className="eyebrow mb-2">How your credentials are stored</p>
           <p className="text-muted">
-            Integration tokens and keys are encrypted at rest with AES-256-GCM
-            and are never sent to your browser. You can disconnect any
-            integration at any time in Settings, which deletes the credential.
-            We recommend connecting a read-only key where possible.
+            We ask for the least access each tool allows. GitHub is read-only
+            and stores no credential at all — access is granted per-repository
+            when you install our GitHub App, and short-lived tokens are issued
+            as needed. Stripe accepts only restricted, read-only keys. When you
+            connect Supabase we use the sign-in to fetch one project&apos;s key
+            and then discard the account access itself, so we never hold
+            standing access to your Supabase organisation.
+          </p>
+          <p className="text-muted mt-3">
+            The keys we do store are encrypted at rest with AES-256-GCM and are
+            never sent to your browser. You can disconnect any integration at
+            any time in Settings, which deletes the credential.
           </p>
         </section>
 

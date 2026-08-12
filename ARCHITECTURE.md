@@ -53,6 +53,12 @@ These are the product, not preferences. Breaking one is a bug even if tests pass
 6. **Honest gaps.** A missing integration or a failed collection is stated in
    the brief's `gaps` array, not hidden.
 7. **One page, no dashboard.** No charts, no filters, no tabs.
+8. **Ask each tool for the least it will grant, and keep less than that.** Every
+   connector is read-only. GitHub stores no credential at all; the Supabase
+   management token is discarded after one use; Stripe takes restricted keys
+   only. Widening a grant for convenience is a bug — see
+   [Auth and security](#auth-and-security) for the two invariants easiest to
+   undo by accident.
 
 ---
 
@@ -74,7 +80,9 @@ only automated check that exists today.
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | brief polish + chat (default `gpt-4o-mini`) |
 | `RESEND_API_KEY` / `EMAIL_FROM` | the 7am email |
 | `NEXT_PUBLIC_APP_URL` | OAuth redirect URI, email links |
-| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth app |
+| `GITHUB_APP_ID` / `GITHUB_APP_SLUG` | GitHub App identity; slug builds the install URL |
+| `GITHUB_APP_PRIVATE_KEY` | signs the RS256 JWT that mints installation tokens; PEM, newlines may be escaped |
+| `SUPABASE_OAUTH_CLIENT_ID` / `_SECRET` | Management API OAuth — the **founder's** Supabase, not the app's |
 | `CRON_SECRET` | cron bearer token; **fails closed if unset** |
 
 ---
@@ -94,20 +102,25 @@ app/
     chat/                     Streaming Q&A over stored facts (the only reader of history)
     settings/                 Zod-validated user_settings upsert
     tool-request/             Demand capture for unsupported tools
-    integrations/             github/{authorize,callback,repos}, supabase, plausible, stripe
+    integrations/             github/{authorize,callback,repos},
+                              supabase/{route,authorize,callback}, plausible, stripe
   auth/callback/              Legacy OAuth-code safety net; not the primary sign-in
 lib/
   brief/generate.ts           The pipeline. Orchestrates everything below
   brief/diff.ts               Deterministic engine: ledger, insight, priorities, allowlist
   collectors/*.ts             One file per data source. Fetch and shape only
+  github/app-auth.ts          GitHub App JWT → installation token. Stores nothing
+  supabase-oauth.ts           Management API OAuth for the FOUNDER's Supabase
   email/send.ts               Brief object → inline-styled HTML email
-  supabase/{admin,server,client}.ts
+  supabase/{admin,server,client}.ts   The APP's own Supabase, not a user's
   crypto.ts  dates.ts  types.ts  sample.ts
 components/
   BriefView.tsx               The brief, on the web
   Wordmark.tsx                Masthead mark + name; the link home on every page
   Landing.tsx  OnboardingFlow.tsx  SettingsForm.tsx  Chat.tsx
 scripts/generate-icons.mjs    Regenerates the favicon PNGs from app/icon.svg
+scripts/audit-stripe-keys.mjs Reports stored Stripe keys that are sk_ not rk_
+scripts/check-github-app.mjs  Validates GITHUB_APP_* and mints a test token
 supabase/migrations/          Sequential SQL, applied by hand
 .github/workflows/            hourly-brief.yml — the real brief schedule (see below)
 middleware.ts                 Session refresh + route gating
@@ -366,9 +379,18 @@ key is rejected **before** anything is stored.
 
 Notable per-source behaviour:
 
-- **GitHub** — PR titles are third-party-writable, so they're truncated to 140
-  chars and capped in count before reaching the LLM. Empty repos 409 on the
-  commits endpoint and are counted as zero.
+- **GitHub** — authenticated per *installation*: `generate.ts` mints a token
+  from `lib/github/app-auth.ts` rather than decrypting a stored one, and
+  `listRepos` reads `/installation/repositories` (an installation token gets 403
+  from `/user/repos`). Pull requests are read per-repo rather than through
+  `/search/issues`, because search under an installation token can come back
+  empty for private repos *without erroring* — which would silently hollow out
+  the shipping half of the brief. Repos are capped at 5, so the extra calls are
+  immaterial against a 5,000/hour per-installation budget. PR titles are
+  third-party-writable, so they're truncated to 140 chars and capped in count
+  before reaching the LLM. Empty repos 409 on the commits endpoint and count as
+  zero. `countCommits()` exists so the comparison day doesn't refetch every pull
+  request just to read one number.
 - **Supabase (founder's)** — `HEAD` + `Prefer: count=exact` only. Schema
   discovery reads the PostgREST OpenAPI root.
 - **Plausible** — buckets by whole days in the *site's* timezone, so it cannot
@@ -382,7 +404,10 @@ Notable per-source behaviour:
 2. Extend the `provider` check constraint in a new migration, and the
    `IntegrationRow` union in `lib/types.ts`.
 3. `app/api/integrations/<name>/route.ts` — Zod-validate, verify live,
-   `encrypt()` the credential, upsert.
+   `encrypt()` the credential, upsert. If the source supports OAuth, prefer
+   storing **no** credential: GitHub keeps only an `installation_id` in `config`
+   and leaves `access_token` null. Guards in `generate.ts` must then key off
+   `config`, not `access_token`.
 4. Wire into `generateBriefForUser` in its own `try/catch` that pushes to
    `facts.gaps` on failure.
 5. Add rows to `buildLedger()` and, if it justifies advice, a scored candidate.
@@ -401,12 +426,30 @@ attempt can invalidate the token and turn a typo into a dead code.
 **`middleware.ts`** refreshes the session on every request and gates
 non-public paths. Because Supabase rotates refresh tokens, rotated cookies are
 replayed onto redirect responses too — dropping them silently signs the user
-out. `/api/integrations/github/callback` is deliberately public so the one-time
-`?code=` reaches its handler; the `gh_oauth_state` cookie is the actual CSRF
-guard, and the handler re-checks the session itself.
+out. The `github/callback` and `supabase/callback` routes are deliberately
+public so the provider's one-time redirect reaches its handler; the
+`gh_oauth_state` / `sb_oauth_state` cookies are the actual CSRF guard, and each
+handler re-checks the session itself.
 
-**Secrets at rest** — every third-party credential is AES-256-GCM encrypted by
-`lib/crypto.ts` before it touches `integrations.access_token`.
+**Least privilege is the design, not a nicety.** Two invariants here are easy to
+undo by accident and expensive to undo in public:
+
+- **GitHub stores no credential.** The App holds read-only permissions and the
+  row carries an `installation_id`; tokens are minted per run in
+  `lib/github/app-auth.ts`. Reverting to an OAuth App would mean the `repo`
+  scope — read *and write* on every private repo — because GitHub offers no
+  read-only alternative there.
+- **The Supabase management token is discarded.** It can read API keys for every
+  project in the user's organisation, so it lives only in a 10-minute encrypted
+  cookie and is dropped once one project's key is fetched
+  (`lib/supabase-oauth.ts`). Persisting it "so refreshes are easier" would trade
+  a per-project credential for org-wide standing access. The refresh token in
+  the exchange response is deliberately ignored.
+
+**Secrets at rest** — every credential we *do* keep is AES-256-GCM encrypted by
+`lib/crypto.ts` before it touches `integrations.access_token`. Stripe accepts
+restricted keys only (`rk_`); `scripts/audit-stripe-keys.mjs` reports rows
+holding an `sk_` from before that was enforced.
 
 **The service-role client bypasses RLS.** `createAdminClient()` carries no user
 context, so **every query must be scoped by `.eq("user_id", …)` explicitly**. A
@@ -435,6 +478,22 @@ serverless instances); one manual brief / 30s / user.
 **Scheduled briefs depend on a GitHub Action, not on Vercel.** See
 [Scheduling](#scheduling) — `vercel.json` alone cannot deliver briefs, and the
 Action is the piece that silently stops.
+
+**Two traps in `scripts/*.mjs`, both hit once already.**
+`supabase-js` builds a Realtime client the moment you call `createClient()`, so
+importing it in a plain Node script throws *"Node.js 20 detected without native
+WebSocket support"* even when nothing subscribes to anything — talk to PostgREST
+over `fetch`, or use `GoTrueClient` directly for auth. And `.env.local` cannot be
+parsed line-by-line: `GITHUB_APP_PRIVATE_KEY` is a quoted multi-line value, and a
+naive parser silently truncates it to its `-----BEGIN` line, which then fails far
+away with an opaque OpenSSL error. Both scripts share a `parseEnv()` that handles
+quoted multi-line values; copy it rather than rewriting one.
+
+**A GitHub App's Setup URL, not its Callback URL, is what returns the user after
+an install.** Leave Setup URL blank and installs end on github.com: the callback
+never runs, no row is written, and the only symptom is a Connect button that
+never changes — with nothing in the logs, because no request reached the server.
+README section 2 has the setting.
 
 **`maxDuration = 60` and sequential users.** The cron processes users in a `for`
 loop, each costing ~6–12 external API calls. See POST_MVP.md Stage 3 — batch

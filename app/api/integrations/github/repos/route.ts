@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { decrypt } from "@/lib/crypto";
+import { getInstallationToken } from "@/lib/github/app-auth";
 import { listRepos } from "@/lib/collectors/github";
 
 async function requireUser() {
@@ -18,18 +18,22 @@ export async function GET() {
   const admin = createAdminClient();
   const { data: integration } = await admin
     .from("integrations")
-    .select("access_token, config")
+    .select("config")
     .eq("user_id", user.id)
     .eq("provider", "github")
     .maybeSingle();
-  if (!integration?.access_token) {
+  // Rows written by the old OAuth App have no installation_id. They can't mint
+  // a token, so they read as not connected and the user reconnects.
+  if (!integration?.config?.installation_id) {
     return NextResponse.json({ error: "github_not_connected" }, { status: 400 });
   }
 
   try {
-    const repos = await listRepos(decrypt(integration.access_token));
+    const token = await getInstallationToken(integration.config.installation_id);
+    const repos = await listRepos(token);
     return NextResponse.json({ repos, selected: integration.config?.repos ?? [] });
-  } catch {
+  } catch (e) {
+    console.error("github repos: listing failed", e);
     return NextResponse.json({ error: "github_api_failed" }, { status: 502 });
   }
 }
@@ -46,9 +50,24 @@ export async function POST(request: Request) {
   }
 
   const admin = createAdminClient();
+  // Merge rather than replace: config also carries installation_id, and
+  // overwriting it would leave a row that can never mint a token again.
+  const { data: existing } = await admin
+    .from("integrations")
+    .select("config")
+    .eq("user_id", user.id)
+    .eq("provider", "github")
+    .maybeSingle();
+  if (!existing?.config?.installation_id) {
+    return NextResponse.json({ error: "github_not_connected" }, { status: 400 });
+  }
+
   const { error } = await admin
     .from("integrations")
-    .update({ config: { repos: parsed.data.repos }, updated_at: new Date().toISOString() })
+    .update({
+      config: { ...existing.config, repos: parsed.data.repos },
+      updated_at: new Date().toISOString(),
+    })
     .eq("user_id", user.id)
     .eq("provider", "github");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

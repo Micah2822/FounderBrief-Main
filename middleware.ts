@@ -45,12 +45,14 @@ export async function middleware(request: NextRequest) {
     path === "/terms" ||
     path.startsWith("/auth") ||
     path.startsWith("/api/cron") ||
-    // The OAuth return leg from github.com. It must reach its route handler
-    // even if the session looks stale here, because redirecting instead
-    // discards the one-time ?code= and leaks it into the /login URL. The route
-    // still calls getUser() itself, so access is not widened — and the
-    // gh_oauth_state cookie is what actually guards it against CSRF.
-    path === "/api/integrations/github/callback";
+    // The OAuth return legs from github.com and supabase.com. They must reach
+    // their route handlers even if the session looks stale here, because
+    // redirecting instead discards the one-time ?code= and leaks it into the
+    // /login URL. Both routes still call getUser() themselves, so access is not
+    // widened — and the gh_oauth_state / sb_oauth_state cookies are what
+    // actually guard them against CSRF.
+    path === "/api/integrations/github/callback" ||
+    path === "/api/integrations/supabase/callback";
 
   if (!user && !isPublic && !path.startsWith("/_next")) {
     const url = request.nextUrl.clone();

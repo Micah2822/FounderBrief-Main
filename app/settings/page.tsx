@@ -40,7 +40,13 @@ export default async function SettingsPage() {
               : i.provider === "plausible"
                 ? (i.config?.domain ?? "")
                 : i.provider === "stripe"
-                  ? `${i.config?.mode ?? "live"} mode${i.config?.restricted ? ", restricted key" : ""}`
+                  ? // An explicit false means a secret key stored before rk_ was
+                    // required — say so, since only the user can rotate it.
+                    `${i.config?.mode ?? "live"} mode${
+                      i.config?.restricted === false
+                        ? " — full secret key, please rotate and reconnect"
+                        : ", read-only"
+                    }`
                   : i.config?.table
                     ? `table "${i.config.table}"`
                     : "",

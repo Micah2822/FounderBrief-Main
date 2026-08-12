@@ -18,7 +18,7 @@ Goal: 10 founders reading a *correct* brief every morning. Nothing else.
 
 | Item | Why | Effort |
 |---|---|---|
-| Deploy (Supabase + Vercel + Resend + GitHub OAuth app) | The README runbook, ~15 min | XS |
+| Deploy (Supabase + Vercel + Resend + GitHub App + Supabase OAuth app) | The README runbook, ~15 min | XS |
 | Onboard 10 founders by hand | Watch them connect; every stumble is a bug | — |
 | Trust audit: verify every number in every brief for a week | One wrong number kills a user forever | S |
 | Error alerting (Vercel log drains or just email on cron failure) | A silently failed 7am brief is churn you can't see | S |
@@ -39,18 +39,28 @@ Goal: make the brief indispensable, not just pleasant.
 **Prioritize by the `tool_requests` table, not by this list's order** — onboarding
 captures "I use X" votes; build the top-voted source first, for named users.
 
+**Then sort by cost, which `Facts` decides for you.** The brief has four slots —
+shipping, product, traffic, revenue (`lib/types.ts`). A source that *fills an
+existing slot* is a collector, a route and an enum entry. A source that *needs a
+new slot* changes `Facts`, the prompt, `buildLedger()`, the scored candidates and
+the deterministic baseline — and every brief already stored. Judge a connector by
+which of those it is, not by how popular the tool is.
+
 | Feature | Notes | Effort |
 |---|---|---|
 | **Generic Postgres collector** | One connection-string integration covers Neon, Railway, Render, RDS, self-hosted — the highest-coverage single addition possible (the current "Supabase" collector is really a PostgREST client). Needs `pg` driver + read-only-role guidance | M |
 | **Firebase/Firestore** | The other half of the indie-stack DB duopoly; count docs in a collection by timestamp field | M |
 |---|---|---|
 | ~~Stripe integration~~ | **Shipped pre-launch** (2026-07-11): gross revenue + new customers via restricted key. Still to do here: MRR (subscriptions API), churn events, failed-payment alerts | S (remainder) |
+| **Stripe App** | Scoped 2026-08-12, deferred — see below. Replaces the pasted `rk_` key with a one-click install and a consent screen that names `charge_read` / `customer_read` | M + review |
 | **PostHog analytics** | Most common Plausible alternative among startups; same collector pattern (`lib/collectors/`) | S |
 | **Fathom / Simple Analytics** | Same pattern; each is ~30 lines | S each |
 | **Vercel Analytics** | Popular but API access is plan-gated; investigate first | M |
 | **Google Analytics** | Deliberately rejected in MVP (OAuth + quota complexity). Only build when non-technical founders are a proven segment | L |
 | **Linear / GitHub Issues** | "3 issues closed, 2 opened" — extends shipping beyond PRs | M |
-| **Guided read-only key flow** | Wizard that generates `CREATE ROLE brief_reader ... GRANT SELECT` SQL for the founder's Supabase — removes the scariest ask in onboarding (service key) | M |
+| **Guided read-only key flow** | Wizard that generates `CREATE ROLE brief_reader ... GRANT SELECT` SQL for the founder's Supabase. **Mostly solved** (2026-08-12) by Management API OAuth — hosted users never see a key. This is now only for the *manual* path, i.e. self-hosted Supabase | S (remainder) |
+| **Lemon Squeezy / Paddle** | Revenue slot, same `RevenueDayData` shape as Stripe — a collector and an enum entry, no brief changes. Widens the funnel to founders who aren't on Stripe. Check OAuth support per-provider; don't assume it | S each |
+| **Sentry or Vercel (errors & deploys)** | The signal the brief structurally lacks: every metric in `Facts` is positive-direction, so it can say "you shipped 4 PRs" but never "your error rate tripled after the 3pm deploy". Both have real OAuth. **Needs a new slot in `Facts`** — this is the expensive one, and the most valuable | L |
 
 ### 1b. Brief intelligence (make the insight smarter, still deterministic-first)
 
@@ -129,11 +139,41 @@ prompt-injection clause in `generate.ts` currently names only PR titles and
 to that context too, its own injection clause needs the same treatment. Cap the
 field length in the Zod schema, as `goal` already is at 200.
 
+#### Stripe App — scoped 2026-08-12, deliberately deferred
+
+**What shipped instead.** The connector work of 2026-08-12 made Stripe read-only
+by *enforcement*: `app/api/integrations/stripe/route.ts` now rejects `sk_`
+outright, so a founder cannot hand over a key that could create a charge or
+issue a refund even by accident. That is the security half, and it was one line.
+What did not ship is the UX half — it is still a pasted key.
+
+**Why it was deferred, and it is not a code problem.** A Stripe App has to be
+registered in the Stripe dashboard and pass Stripe's review before anyone can
+install it. That is weeks of external dependency on someone else's queue, so
+writing the install callback first would have meant untested OAuth code sitting
+in the repo with no way to exercise it.
+
+**Shape when built.** Declare `charge_read` and `customer_read` permissions —
+that is the whole point, because the consent screen then literally reads
+*read-only access to charges and customers*, which is worth more than any
+reassurance on the landing page. Store the app's scoped access key in
+`access_token` and the account id in `config`; `lib/collectors/stripe.ts` should
+need no change, since only the key differs. Keep the `rk_` paste behind "connect
+manually" exactly as the Supabase manual path works.
+
+**Verify the current key mechanics against Stripe's docs before building** —
+that surface has changed more than once, and this file is not authoritative
+about it.
+
+**Do not reach for Stripe Connect instead.** It needs review too, so it buys
+nothing on speed, its consent screen is broad and vague, and it is designed for
+marketplaces — a read-only briefing tool is an odd fit that review may question.
+
 ### 1c. Delivery surfaces
 
 | Feature | Notes | Effort |
 |---|---|---|
-| **Slack DM delivery** | Many founders live in Slack, not email. Same brief object → Block Kit renderer (the `renderBriefEmail` pattern generalizes) | M |
+| **Slack DM delivery** | Many founders live in Slack, not email. Same brief object → Block Kit renderer (the `renderBriefEmail` pattern generalizes). **Slack is a destination, not a source** — it fills no slot in `Facts`, so it never belongs in 1a. Clean OAuth, one-click install, and a Slack app-directory listing is distribution as well as delivery | M |
 | **PWA / add-to-home-screen** | The 7:05am-in-bed session; manifest + icons, no native app | S |
 | **Reply-to-brief → chat** | Reply to the email, the answer comes from `/api/chat` via Resend inbound webhook. Zero-friction retention loop | M |
 
@@ -247,6 +287,8 @@ Unvalidated, potentially large. Pick **one** at a time:
 - **API / webhooks** — the brief object as a product; Zapier integration
 - **Multi-startup portfolio view** — for angels and studio founders
 - **Native mobile app** — only if PWA engagement data demands it; push notifications are the sole real advantage
+- **Ecommerce brief (Shopify)** — deliberately *not* in 1a. Shopify has the best OAuth and app store on this list, but its founders care about AOV, refunds, inventory, ad spend and ROAS, and they bring no GitHub and no Supabase — three of the four slots in `Facts` sit permanently empty and the brief reads broken. This is a second product sharing a pipeline, not a connector. Also note the space already has funded competition (Triple Whale, Polar Analytics, Lifetimely), which the SaaS-founder segment does not
+- **Mobile-app brief (RevenueCat)** — same shape of bet. Trial conversion, cohort churn and store breakdown are a different vocabulary, the stack around it is Firebase and App Store Connect rather than the current four, and RevenueCat offers API keys only, no OAuth. Fork the brief or don't bother
 
 ---
 

@@ -90,20 +90,30 @@ Real values go in `.env.local`, which `.gitignore` covers via `.env*.local`.
 7. Settings → API → copy the project URL, `anon` key, and `service_role` key
    into `.env.local`.
 
-### 2. GitHub OAuth App (one, plus one for local dev)
+### 2. GitHub App
 
 GitHub is a **data source, not a sign-in method** — the only way into the app
-is an emailed sign-in code. So there is one OAuth App, used during onboarding
-to read repos. A GitHub OAuth App has only **one** Authorization callback URL
-and this one points at your own server, which is why dev and prod need
-separate apps.
+is an emailed sign-in code. This is a GitHub **App**, not an OAuth App, and the
+distinction matters: OAuth Apps have no read-only scope for private
+repositories. Their only options are `public_repo` (write access, public repos
+only) and `repo` (read *and write* on everything), so the consent screen would
+read "Full control of private repositories" for a product that just counts
+commits. Fine-grained read-only permissions exist only on GitHub Apps.
+
+Two consequences worth knowing before you start:
+
+- **No GitHub credential is ever stored.** The row in `integrations` holds an
+  `installation_id`, which is not a secret; tokens are minted on demand from the
+  app's private key (`lib/github/app-auth.ts`).
+- **One app covers dev and production.** GitHub Apps accept several callback
+  URLs, so unlike an OAuth App there is no need for a separate localhost app.
 
 **First: create a GitHub Organization to own it.**
 
-An OAuth App registered under a personal account shows *your personal handle
-and avatar* as the publisher on the consent screen every user sees when they
-connect GitHub. An org shows the product's name instead, and can later apply
-for publisher verification (which removes the "unverified app" notice).
+An app registered under a personal account shows *your personal handle and
+avatar* as the publisher on the consent screen every user sees when they connect
+GitHub. An org shows the product's name instead, and can later apply for
+publisher verification (which removes the "unverified app" notice).
 
 This is not a second GitHub account — from your existing one, go to Settings →
 Organizations → **New organization** (free plan). You become its owner; your
@@ -122,44 +132,129 @@ personal repos stay personal.
    membership reads **Private**. This keeps your personal account off the org's
    public members list — the last place it would otherwise be linked.
 
-Then register the app below **under the org** (the New OAuth App form has an
+Then register the app below **under the org** (the New GitHub App form has an
 Owner dropdown — pick the org, not yourself).
 
 > Already made it under your personal account? App settings → Transfer
-> ownership. The Client ID and Secret survive the move, so nothing breaks and
-> connected users don't need to re-authorize.
+> ownership. The App ID and private key survive the move, so nothing breaks and
+> existing installations stay intact.
 
 **The app** (credentials go to `.env.local`)
 
-1. GitHub → Settings → Developer settings → OAuth Apps → **New OAuth App**
-   - Application name: `Founder Brief — GitHub data`
+1. GitHub → Settings → Developer settings → **GitHub Apps** → **New GitHub App**
+   - GitHub App name: `Founder Brief` (this is what users see)
    - Homepage URL: `https://YOURAPP`
-   - Authorization callback URL:
+   - Callback URL: `https://YOURAPP/api/integrations/github/callback`
+     — then **Add callback URL** and also add
+     `http://localhost:3000/api/integrations/github/callback`
+   - **Post installation → Setup URL:**
      `https://YOURAPP/api/integrations/github/callback`
-   - Register application
-2. Copy the Client ID and generate a secret.
-3. Put them in `.env.local` as `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`.
+   - **Post installation → check "Redirect on update"**
+   - **Uncheck** "Expire user authorization tokens" — unused, we never issue
+     user tokens.
+   - Webhook → **uncheck Active**. Nothing here listens for webhooks.
 
-Since one OAuth App allows only one callback URL, register a **second** app for
-local development — identical, but with callback
-`http://localhost:3000/api/integrations/github/callback` — and use its
-credentials in your local `.env.local`, keeping the production pair for Vercel.
+   > **The Setup URL is the one that actually matters, and it is easy to skip.**
+   > For a GitHub App the Callback URL governs the *user-authorization* flow,
+   > which this app doesn't use. The redirect after an **installation** is the
+   > Setup URL. Leave it blank and installs simply end on github.com: our
+   > handler never runs, no row is written, and onboarding still shows "Connect
+   > GitHub" while GitHub shows "Configure" — with nothing in your logs, because
+   > no request ever reached your server. "Redirect on update" is what brings a
+   > user back after they change which repos the app can see.
+   >
+   > Setup URL takes a single value, so in development either point it at
+   > `http://localhost:3000/...` temporarily or test against production.
+2. **Repository permissions** — read-only, and nothing else:
 
-`NEXT_PUBLIC_APP_URL` must match the registered callback's host **exactly** —
-apex vs `www` counts as a mismatch, and GitHub rejects the handshake with a
-redirect URI error. If it is unset the code falls back to the request origin,
-which on Vercel can be the `*.vercel.app` deployment host rather than your
-domain. For the same reason, preview deployments cannot complete this flow.
+   | Permission | Access |
+   |---|---|
+   | Contents | Read-only |
+   | Pull requests | Read-only |
+   | Issues | Read-only |
+   | Deployments | Read-only |
+   | Metadata | Read-only (mandatory) |
 
-These live in `.env.local` rather than Supabase because your Next.js server
-runs this handshake itself (`app/api/integrations/github/authorize/route.ts`),
-requesting the `repo read:user` scope.
+   Grant no write access anywhere and no account permissions. If you find
+   yourself adding a write permission to fix something, the fix is wrong.
+3. **Where can this GitHub App be installed?** → **Any account**. Without this,
+   only your own org can connect and no customer can onboard.
+4. Create the app, then **Generate a private key**. A `.pem` downloads — this is
+   the only copy, GitHub does not show it again.
+5. Fill `.env.local`:
+   - `GITHUB_APP_ID` — the App ID on the app's settings page
+   - `GITHUB_APP_SLUG` — the last path segment of the app's public page
+     (`github.com/apps/<slug>`), which is the name lowercased and hyphenated
+   - `GITHUB_APP_PRIVATE_KEY` — the `.pem` contents. If your env UI won't take a
+     multi-line value, replace the newlines with literal `\n`; both forms work.
+     To read run; `cat <name>.private-key.pem`
+
+`NEXT_PUBLIC_APP_URL` must match a registered callback's host **exactly** — apex
+vs `www` counts as a mismatch, and GitHub rejects the handshake with a redirect
+URI error. If it is unset the code falls back to the request origin, which on
+Vercel can be the `*.vercel.app` deployment host rather than your domain. For
+the same reason, preview deployments cannot complete this flow.
 
 Replace `YOURAPP` throughout with your real production domain once you know it
-(Vercel gives you one at first deploy); the callback URLs can be edited on an
-existing OAuth App at any time without invalidating its Client ID or Secret.
+(Vercel gives you one at first deploy); callback URLs can be edited on an
+existing app at any time without invalidating the App ID or private key.
 
-### 3. Email delivery
+### 3. Supabase OAuth app (for connecting *users'* projects)
+
+Not to be confused with section 1. That was **your** Supabase project, where
+Founder Brief stores its own data. This is an OAuth app registered against the
+Supabase **Management API** so that a user connecting their product's database
+picks a project from a dropdown instead of hunting down a `service_role` key.
+
+How it works, and why it is safe: the management token can read API keys for
+every project in the user's organisation, which is far more authority than the
+brief needs. So it is never stored. It lives in an encrypted, httpOnly,
+10-minute cookie, is used once to fetch the chosen project's key, and is then
+discarded (`lib/supabase-oauth.ts`). What ends up in the database is exactly
+what the manual paste flow would have stored: one project's key.
+
+1. Supabase dashboard → **Organization Settings** → **OAuth Apps** →
+   **Add application**.
+   - Application name: `Founder Brief`
+   - Website: `https://YOURAPP`
+   - Authorization callback URLs — **Add URL** twice, as with the GitHub App:
+     `https://YOURAPP/api/integrations/supabase/callback` and
+     `http://localhost:3000/api/integrations/supabase/callback`
+
+   Both must end in `/supabase/callback`. Pasting the `/github/callback` URL
+   here is an easy slip and fails at the redirect with nothing in your own logs,
+   because the request never reaches your server.
+2. **Permissions** — the app makes exactly two calls, so it needs exactly two
+   read scopes:
+
+   | Category | Access | Why |
+   |---|---|---|
+   | Projects | Read | `GET /v1/projects` — builds the project dropdown |
+   | Secrets | Read | `GET /v1/projects/{ref}/api-keys` — fetches the chosen project's key |
+   | *everything else* | **None** | Auth, Database, Domains, Edge Functions, Environment, Rest, Storage, Analytics, Organizations |
+
+   **No Write access on any category.** Nothing in this codebase writes to a
+   user's Supabase; if you find yourself granting one to fix an error, the fix
+   is wrong.
+
+   If the project dropdown loads but choosing one fails with a 403, the API-key
+   read sits under a different scope than **Secrets** in your dashboard's
+   wording — grant the next-narrowest read scope, not a blanket one, and
+   correct this table. Supabase has renamed these buckets before.
+
+   Worth being clear-eyed about what **Secrets: Read** is: it can read API keys
+   for *every* project in the organisation, not just the one the user picks.
+   That is precisely why the token is discarded after a single use rather than
+   stored (`lib/supabase-oauth.ts`). The scope is broad because Supabase offers
+   nothing narrower — the mitigation is how briefly we hold it.
+3. Copy the client ID and secret into `.env.local` as
+   `SUPABASE_OAUTH_CLIENT_ID` / `SUPABASE_OAUTH_CLIENT_SECRET`.
+
+If these are unset the connect button returns a configuration error, but the
+**Connect manually** path still works — that path also exists permanently for
+self-hosted Supabase, which has no Management API.
+
+### 4. Email delivery
 
 Two separate email paths, configured in two different places:
 
@@ -176,23 +271,28 @@ Two separate email paths, configured in two different places:
 OpenAI, briefs are fully deterministic (still correct); without Resend, no
 email is sent.
 
-### 4. Run
+### 5. Run
 
 ```bash
 npm install
 npm run dev
 ```
 
-### 5. Deploy (Vercel)
+### 6. Deploy (Vercel)
 
 1. Push to GitHub, import into Vercel.
 2. Add all env vars (set `NEXT_PUBLIC_APP_URL` to the production URL and
    `CRON_SECRET` to a random string — `openssl rand -base64 32`).
-3. Once you know the production domain, replace `YOURAPP` in the three places
-   that hardcode it: Supabase **Site URL**, Supabase **Redirect URLs**, and the
-   GitHub OAuth App's Authorization callback URL. All three must use the same
-   host you set in `NEXT_PUBLIC_APP_URL` — pick apex or `www` and redirect the
-   other to it.
+3. Once you know the production domain, replace `YOURAPP` everywhere it is
+   hardcoded outside the repo:
+   - Supabase **Site URL** (section 1)
+   - Supabase **Redirect URLs** (section 1)
+   - the **GitHub App's callback URL** (section 2)
+   - the **Supabase OAuth app's redirect URL** (section 3)
+
+   All four must use the same host you set in `NEXT_PUBLIC_APP_URL` — pick apex
+   or `www` and redirect the other to it. A mismatch fails at the redirect,
+   which looks like a connector that silently refuses to connect.
 
 **Scheduling the brief.** `/api/cron/hourly` must run every hour: each run
 serves only the users whose local time has just reached their send hour
@@ -224,7 +324,11 @@ On Vercel Pro, set `vercel.json` back to `0 * * * *` and delete the workflow.
 - **`lib/brief/generate.ts`** — the pipeline. Collect → facts → baseline →
   LLM polish → validate → store. Idempotent per (user, day).
 - **`lib/collectors/`** — pure fetch-and-store, zero AI.
-- Integration tokens are AES-256-GCM encrypted at rest (`lib/crypto.ts`).
+- **`lib/github/app-auth.ts`** — mints installation tokens from the GitHub App's
+  private key. No GitHub credential is stored, so there is nothing to leak.
+- **`lib/supabase-oauth.ts`** — the Management API handshake, and the reason the
+  token it obtains is deliberately thrown away.
+- Stored keys are AES-256-GCM encrypted at rest (`lib/crypto.ts`).
 - RLS on every table; service-role writes are explicitly user-scoped.
 - The founder's Supabase is queried with **counts only** (PostgREST `HEAD` +
   `count=exact`) — row contents are never read and never sent to OpenAI.
@@ -236,8 +340,22 @@ See [POST_MVP.md](./POST_MVP.md) — every deferred feature, staged by trigger
 
 ## Security
 
+The guiding rule is to ask each tool for the least it will grant, and to hold as
+little of that as possible.
+
+- **GitHub** — read-only permissions, per-repository, and **no credential
+  stored**: the row holds an `installation_id` and tokens are minted per run.
+  Never migrate back to an OAuth App; `repo` is the only scope that can read
+  private repositories and it carries write access with it.
+- **Supabase** — the OAuth flow's management token is used once and discarded,
+  so we hold one project's key rather than standing access to an organisation.
+  Keeping that token "to make refreshes easier" would undo the whole point.
+- **Stripe** — restricted keys only (`rk_`). Secret keys are rejected at the
+  API boundary; `scripts/audit-stripe-keys.mjs` reports any stored before that
+  was enforced.
+- **Plausible** — no OAuth exists; its keys are read-only by nature.
+- For the manual Supabase path, recommend founders create a **read-only**
+  Postgres role rather than handing over their service key.
 - Never expose `SUPABASE_SERVICE_ROLE_KEY`, `ENCRYPTION_KEY`, or integration
   tokens to the client.
-- Recommend founders create a **read-only** Postgres role / restricted key for
-  the data-source connection rather than their service key.
 - Only aggregate counts and PR titles reach OpenAI — no end-user PII.

@@ -7,7 +7,8 @@ import {
   localMidnightUTC,
   weekday,
 } from "@/lib/dates";
-import { collectGitHub, daysSinceLastShip } from "@/lib/collectors/github";
+import { collectGitHub, countCommits, daysSinceLastShip } from "@/lib/collectors/github";
+import { getInstallationToken } from "@/lib/github/app-auth";
 import { collectProduct, countInWindow } from "@/lib/collectors/supabase";
 import { collectTraffic, visitorsInWindow } from "@/lib/collectors/plausible";
 import { collectRevenue, revenueInWindow } from "@/lib/collectors/stripe";
@@ -71,16 +72,18 @@ export async function generateBriefForUser(
   if (goal) facts.founder_goal = goal; // in facts, so its numbers join the allowlist
 
   // ── GitHub ───────────────────────────────────────────────────────────
-  if (github?.access_token && github.config?.repos?.length) {
+  if (github?.config?.installation_id && github.config?.repos?.length) {
     try {
-      const token = decrypt(github.access_token);
+      // Minted per run from the GitHub App's private key — nothing to decrypt,
+      // because no GitHub credential is stored (see lib/github/app-auth.ts).
+      const token = await getInstallationToken(github.config.installation_id);
       const repos: string[] = github.config.repos;
-      const [day, lastShip, prevDay] = await Promise.all([
+      const [day, lastShip, prevCommits] = await Promise.all([
         collectGitHub(token, repos, range, date),
         daysSinceLastShip(token, repos, date),
-        collectGitHub(token, repos, prevRange, addDays(date, -1)),
+        countCommits(token, repos, prevRange),
       ]);
-      facts.github = { ...day, commits_prev_day: prevDay.commits, days_since_last_ship: lastShip };
+      facts.github = { ...day, commits_prev_day: prevCommits, days_since_last_ship: lastShip };
       await db.from("daily_metrics").upsert(
         { user_id: userId, metric_date: date, source: "github", data: facts.github },
         { onConflict: "user_id,metric_date,source" }

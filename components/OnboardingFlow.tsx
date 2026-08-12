@@ -5,17 +5,29 @@ import { useRouter } from "next/navigation";
 
 type Repo = { full_name: string; private: boolean; pushed_at: string };
 type Table = { table: string; timestamp_columns: string[] };
+type Project = { ref: string; name: string };
+
+// The Supabase management token lives in a 10-minute cookie, so "expired" is a
+// normal outcome rather than a fault, and the fix is always the same.
+function reconnectMessage(error: string | undefined, fallback: string): string {
+  if (error === "supabase_reconnect") {
+    return "That took a little too long — connect Supabase again to pick up where you left off.";
+  }
+  return error ?? fallback;
+}
 
 export function OnboardingFlow({
   githubConnected,
   githubRepos,
   supabaseConnected,
+  supabasePickingProject,
   plausibleConnected,
   stripeConnected,
 }: {
   githubConnected: boolean;
   githubRepos: string[];
   supabaseConnected: boolean;
+  supabasePickingProject: boolean;
   plausibleConnected: boolean;
   stripeConnected: boolean;
 }) {
@@ -65,10 +77,18 @@ export function OnboardingFlow({
         </p>
       </div>
 
-      <GitHubStep connected={githubConnected} initialRepos={githubRepos} onSaved={() => setReposSaved(true)} />
-      <SupabaseStep connected={supabaseConnected} onSaved={() => setSbSaved(true)} />
-      <PlausibleStep connected={plausibleConnected} onSaved={() => setPlSaved(true)} />
-      <StripeStep connected={stripeConnected} onSaved={() => setStSaved(true)} />
+      {/* Order is the onboarding order: the two one-click connections first, then
+          the optional pasted keys. Step numbers are derived from position so
+          reordering can't leave a stale label behind. */}
+      <GitHubStep step={1} connected={githubConnected} initialRepos={githubRepos} onSaved={() => setReposSaved(true)} />
+      <SupabaseStep
+        step={2}
+        connected={supabaseConnected}
+        pickingProject={supabasePickingProject}
+        onSaved={() => setSbSaved(true)}
+      />
+      <StripeStep step={3} connected={stripeConnected} onSaved={() => setStSaved(true)} />
+      <PlausibleStep step={4} connected={plausibleConnected} onSaved={() => setPlSaved(true)} />
 
       <section className="rise rise-5 border-t border-line pt-8">
         <p className="eyebrow mb-3">Step 5 — Your first brief</p>
@@ -149,10 +169,12 @@ function ToolRequest() {
 // ── Step 1: GitHub ──────────────────────────────────────────────────────
 
 function GitHubStep({
+  step,
   connected,
   initialRepos,
   onSaved,
 }: {
+  step: number;
   connected: boolean;
   initialRepos: string[];
   onSaved: () => void;
@@ -194,12 +216,15 @@ function GitHubStep({
   }
 
   return (
-    <section className="rise rise-1 border-t border-line pt-8">
-      <p className="eyebrow mb-3">Step 1 — GitHub</p>
+    <section className={`rise rise-${step} border-t border-line pt-8`}>
+      <p className="eyebrow mb-3">Step {step} — GitHub</p>
       {!connected ? (
         <>
           <p className="text-[14px] text-muted leading-relaxed mb-4 max-w-md">
             Merged PRs, commits, deployments — the shipping half of your brief.
+            GitHub will ask you to pick which repositories we can see, and the
+            access is <em>read-only</em>: nothing here can push code or change
+            your repos.
           </p>
           <a href="/api/integrations/github/authorize" className="btn-primary">
             Connect GitHub
@@ -244,9 +269,23 @@ function GitHubStep({
 
 // ── Step 2: Supabase (the founder's product database) ──────────────────
 
-function SupabaseStep({ connected, onSaved }: { connected: boolean; onSaved: () => void }) {
+function SupabaseStep({
+  step,
+  connected,
+  pickingProject,
+  onSaved,
+}: {
+  step: number;
+  connected: boolean;
+  pickingProject: boolean;
+  onSaved: () => void;
+}) {
   const [url, setUrl] = useState("");
   const [key, setKey] = useState("");
+  const [manual, setManual] = useState(false);
+  const [projects, setProjects] = useState<Project[] | null>(null);
+  const [loadingProjects, setLoadingProjects] = useState(pickingProject && !connected);
+  const [projectRef, setProjectRef] = useState("");
   const [tables, setTables] = useState<Table[] | null>(null);
   const [table, setTable] = useState("");
   const [tsColumn, setTsColumn] = useState("");
@@ -254,21 +293,59 @@ function SupabaseStep({ connected, onSaved }: { connected: boolean; onSaved: () 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Returning from the OAuth callback: the management token is sitting in an
+  // httpOnly cookie, so the project list is one request away.
+  useEffect(() => {
+    if (!pickingProject || saved) {
+      setLoadingProjects(false);
+      return;
+    }
+    post({ action: "list-projects" })
+      .then(({ ok, data }) => {
+        if (ok) setProjects(data.projects ?? []);
+        else setError(reconnectMessage(data.error, "Couldn't load your projects."));
+      })
+      .finally(() => setLoadingProjects(false));
+  }, [pickingProject, saved]);
+
+  async function post(body: Record<string, unknown>) {
+    const res = await fetch("/api/integrations/supabase", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { ok: res.ok, data: await res.json() };
+  }
+
+  function applyTables(data: any) {
+    setTables(data.tables);
+    if (data.suggested) {
+      setTable(data.suggested.table);
+      setTsColumn(data.suggested.ts_column);
+    } else if (data.tables.length === 1) {
+      pickTable(data.tables[0].table, data.tables);
+    }
+  }
+
+  async function chooseProject(ref: string) {
+    setProjectRef(ref);
+    if (!ref) return;
+    setBusy(true);
+    setError(null);
+    const { ok, data } = await post({ action: "select-project", project_ref: ref });
+    setBusy(false);
+    if (ok) applyTables(data);
+    else setError(reconnectMessage(data.error, "Couldn't read that project."));
+  }
+
   async function discover(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const res = await fetch("/api/integrations/supabase", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "discover", url: url.trim(), key: key.trim() }),
-    });
-    const data = await res.json();
+    const { ok, data } = await post({ action: "discover", url: url.trim(), key: key.trim() });
     setBusy(false);
-    if (res.ok) {
-      setTables(data.tables);
-      if (data.tables.length === 1) pickTable(data.tables[0].table, data.tables);
-    } else setError(data.error ?? "Couldn't connect.");
+    if (ok) applyTables(data);
+    else setError(data.error ?? "Couldn't connect.");
   }
 
   function pickTable(t: string, list?: Table[]) {
@@ -280,50 +357,113 @@ function SupabaseStep({ connected, onSaved }: { connected: boolean; onSaved: () 
   async function save() {
     setBusy(true);
     setError(null);
-    const res = await fetch("/api/integrations/supabase", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "save", url: url.trim(), key: key.trim(), table, ts_column: tsColumn }),
-    });
-    const data = await res.json();
+    const { ok, data } = await post(
+      projectRef
+        ? { action: "save-oauth", project_ref: projectRef, table, ts_column: tsColumn }
+        : { action: "save", url: url.trim(), key: key.trim(), table, ts_column: tsColumn }
+    );
     setBusy(false);
-    if (res.ok) {
+    if (ok) {
       setSaved(true);
       onSaved();
-    } else setError(data.error ?? "Couldn't save.");
+    } else setError(reconnectMessage(data.error, "Couldn't save."));
   }
 
   return (
-    <section className="rise rise-2 border-t border-line pt-8">
-      <p className="eyebrow mb-3">Step 2 — Supabase</p>
+    <section className={`rise rise-${step} border-t border-line pt-8`}>
+      <p className="eyebrow mb-3">Step {step} — Supabase</p>
       {saved ? (
         <Done text={table ? `Counting new rows in "${table}"` : "Signups connected"} />
+      ) : !tables && loadingProjects ? (
+        // Without this the connect button flashes back up while the project
+        // list is still in flight, which reads as though the connect failed.
+        <p className="text-[14px] text-faint">Loading your Supabase projects…</p>
+      ) : !tables && projects?.length ? (
+        <>
+          <p className="text-[14px] text-muted leading-relaxed mb-4 max-w-md">
+            Which project is your product?
+          </p>
+          <select
+            value={projectRef}
+            onChange={(e) => chooseProject(e.target.value)}
+            disabled={busy}
+            className="field max-w-md"
+            aria-label="Supabase project"
+          >
+            <option value="" disabled>
+              {busy ? "Reading project…" : "Choose a project…"}
+            </option>
+            {projects.map((p) => (
+              <option key={p.ref} value={p.ref}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </>
+      ) : !tables && projects ? (
+        <p className="text-[14px] text-muted leading-relaxed max-w-md">
+          That Supabase account has no projects yet. Create one, then connect
+          again — or skip this step; your brief works without it.
+        </p>
       ) : !tables ? (
         <>
           <p className="text-[14px] text-muted leading-relaxed mb-4 max-w-md">
             Point at your product&apos;s database and we&apos;ll count new
             signups. We only ever run counts — never read row contents.
           </p>
-          <form onSubmit={discover} className="space-y-3 max-w-md">
-            <input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://yourproject.supabase.co"
-              className="field"
-              aria-label="Supabase project URL"
-            />
-            <input
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              type="password"
-              placeholder="service_role key (stored encrypted)"
-              className="field"
-              aria-label="Supabase service role key"
-            />
-            <button type="submit" disabled={!url || !key || busy} className="btn-ghost">
-              {busy ? "Connecting…" : "Connect Supabase"}
-            </button>
-          </form>
+          {!manual ? (
+            <>
+              <a href="/api/integrations/supabase/authorize" className="btn-primary">
+                Connect Supabase
+              </a>
+              <p className="text-[12px] text-faint mt-3">
+                You&apos;ll pick a project from a list — no keys to hunt for. We
+                don&apos;t keep access to your Supabase account afterwards.{" "}
+                <button
+                  type="button"
+                  onClick={() => setManual(true)}
+                  className="underline hover:text-ink"
+                >
+                  Connect manually instead
+                </button>
+                .
+              </p>
+            </>
+          ) : (
+            <>
+              <form onSubmit={discover} className="space-y-3 max-w-md">
+                <input
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://yourproject.supabase.co"
+                  className="field"
+                  aria-label="Supabase project URL"
+                />
+                <input
+                  value={key}
+                  onChange={(e) => setKey(e.target.value)}
+                  type="password"
+                  placeholder="service_role key (stored encrypted)"
+                  className="field"
+                  aria-label="Supabase service role key"
+                />
+                <button type="submit" disabled={!url || !key || busy} className="btn-ghost">
+                  {busy ? "Connecting…" : "Connect Supabase"}
+                </button>
+              </form>
+              <p className="text-[12px] text-faint mt-3">
+                For self-hosted Supabase, which has no management API.{" "}
+                <button
+                  type="button"
+                  onClick={() => setManual(false)}
+                  className="underline hover:text-ink"
+                >
+                  Use the connect button instead
+                </button>
+                .
+              </p>
+            </>
+          )}
         </>
       ) : (
         <>
@@ -366,9 +506,19 @@ function SupabaseStep({ connected, onSaved }: { connected: boolean; onSaved: () 
   );
 }
 
-// ── Step 3: Plausible (website traffic, optional) ───────────────────────
+// ── Plausible (website traffic, optional) ──────────────────────────────
+// Last of the connectors: Plausible has no OAuth, so this is the only step that
+// still asks for a pasted key and it shouldn't be what a new user meets first.
 
-function PlausibleStep({ connected, onSaved }: { connected: boolean; onSaved: () => void }) {
+function PlausibleStep({
+  step,
+  connected,
+  onSaved,
+}: {
+  step: number;
+  connected: boolean;
+  onSaved: () => void;
+}) {
   const [domain, setDomain] = useState("");
   const [key, setKey] = useState("");
   const [saved, setSaved] = useState(connected);
@@ -393,8 +543,8 @@ function PlausibleStep({ connected, onSaved }: { connected: boolean; onSaved: ()
   }
 
   return (
-    <section className="rise rise-3 border-t border-line pt-8">
-      <p className="eyebrow mb-3">Step 3 — Website traffic</p>
+    <section className={`rise rise-${step} border-t border-line pt-8`}>
+      <p className="eyebrow mb-3">Step {step} — Website traffic</p>
       {saved ? (
         <Done text={domain ? `Tracking visitors on ${domain}` : "Analytics connected"} />
       ) : (
@@ -409,8 +559,18 @@ function PlausibleStep({ connected, onSaved }: { connected: boolean; onSaved: ()
             >
               Plausible Analytics
             </a>
-            , connect it to see visitors alongside signups. Create an API key
-            under Settings → API keys in Plausible.
+            , connect it to see visitors alongside signups. Plausible keys are{" "}
+            <em>read-only</em> — we can only read stats, never change anything in
+            your account. Create one under{" "}
+            <a
+              href="https://plausible.io/settings/api-keys"
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-2 hover:text-ink"
+            >
+              Settings → API keys
+            </a>
+            .
           </p>
           <form onSubmit={save} className="space-y-3 max-w-md">
             <input
@@ -445,7 +605,15 @@ function PlausibleStep({ connected, onSaved }: { connected: boolean; onSaved: ()
 
 // ── Step 4: Stripe (revenue, optional — never required) ────────────────
 
-function StripeStep({ connected, onSaved }: { connected: boolean; onSaved: () => void }) {
+function StripeStep({
+  step,
+  connected,
+  onSaved,
+}: {
+  step: number;
+  connected: boolean;
+  onSaved: () => void;
+}) {
   const [key, setKey] = useState("");
   const [saved, setSaved] = useState(connected);
   const [busy, setBusy] = useState(false);
@@ -469,17 +637,18 @@ function StripeStep({ connected, onSaved }: { connected: boolean; onSaved: () =>
   }
 
   return (
-    <section className="rise rise-4 border-t border-line pt-8">
-      <p className="eyebrow mb-3">Step 4 — Revenue</p>
+    <section className={`rise rise-${step} border-t border-line pt-8`}>
+      <p className="eyebrow mb-3">Step {step} — Revenue</p>
       {saved ? (
         <Done text="Tracking revenue and new customers" />
       ) : (
         <>
           <p className="text-[14px] text-muted leading-relaxed mb-4 max-w-md">
             If you have paying customers, connect Stripe to see revenue in your
-            brief. Create a <em>restricted</em> key with read-only access to
-            Charges and Customers (Developers → API keys → Create restricted
-            key).
+            brief. This needs a <em>restricted</em> key (Developers → API keys →
+            Create restricted key) with read access to Charges and Customers,
+            and nothing else. Secret keys are rejected — we never hold anything
+            that could move your money.
           </p>
           <form onSubmit={save} className="space-y-3 max-w-md">
             <input
