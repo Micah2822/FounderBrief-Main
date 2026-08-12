@@ -25,14 +25,28 @@ export function renderBriefEmail(brief: Brief, appUrl: string): string {
     })
     .join("");
 
-  const priorities = brief.priorities
-    .map(
-      (p, i) =>
-        `<tr><td style="padding:7px 0;font-size:15px;color:${ink};line-height:1.5;">
-          <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:${muted};">${i + 1}.</span>&nbsp; ${esc(p)}
+  // Priorities are ranked, so the first is pulled out — mirroring BriefView.
+  // The rule is a border-left on the cell itself: a pseudo-element or a
+  // separate spacer column would not survive Outlook.
+  const lead = brief.priorities[0]
+    ? `<tr><td style="padding:2px 0 2px 14px;border-left:2px solid ${ink};">
+        <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:0.14em;color:${muted};text-transform:uppercase;padding-bottom:5px;">The main todo</div>
+        <div style="font-size:17px;color:${ink};line-height:1.4;font-weight:600;">${esc(brief.priorities[0])}</div>
+      </td></tr>
+      <tr><td style="height:14px;line-height:14px;font-size:0;">&nbsp;</td></tr>`
+    : "";
+
+  const priorities =
+    lead +
+    brief.priorities
+      .slice(1)
+      .map(
+        (p, i) =>
+          `<tr><td style="padding:7px 0;font-size:15px;color:${ink};line-height:1.5;">
+          <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:${muted};">${i + 2}.</span>&nbsp; ${esc(p)}
         </td></tr>`
-    )
-    .join("");
+      )
+      .join("");
 
   const gaps = brief.gaps.length
     ? `<p style="font-size:13px;color:${muted};line-height:1.6;margin:28px 0 0;border-top:1px solid ${line};padding-top:16px;">${brief.gaps.map(esc).join("<br/>")}</p>`

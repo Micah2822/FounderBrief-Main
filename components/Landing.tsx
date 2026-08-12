@@ -25,9 +25,9 @@ export function Landing() {
           in 30 seconds.
         </h1>
         <p className="text-muted text-[16px] leading-relaxed mt-5 max-w-[30rem]">
-          Founder Brief reads your analytics, your product&apos;s database,
-          and your GitHub overnight, and answers one question before you open
-          anything else:{" "}
+          Everything you need to know for your startup is already in your
+          tools — just scattered across five of them. Founder Brief reads them
+          all while you sleep, then tells you:{" "}
           <em className="text-ink not-italic font-medium">
             what happened yesterday, and what should I focus on today?
           </em>
@@ -65,7 +65,7 @@ export function Landing() {
             },
             {
               t: "You read one brief, then build",
-              d: "One page, one email. What moved, the one insight that matters, and three things to do today.",
+              d: "One page, one email. What moved, the one insight that matters, and the things that actually deserve today.",
             },
           ].map((s, i) => (
             <div key={i} className="flex gap-4">

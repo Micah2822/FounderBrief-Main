@@ -58,9 +58,76 @@ captures "I use X" votes; build the top-voted source first, for named users.
 |---|---|---|
 | **Weekly review (Monday edition)** | "Last week vs the week before" — the 5-minute Monday version of the daily 30-second read | M |
 | **Goal tracking v2** | MVP stores one free-text goal. v2 parses a target ("100 users") and tracks it: "You said 100 users — you're at 62, +9 this week, on pace for Aug 3." The single highest-leverage retention feature in this list | M |
+| **Founder context at onboarding** | Capture `stage` and a one-line `description` so advice can be situated. Scoped and deferred 2026-08-11 — see below | S |
 | **Launch/event annotations** | "I launched on PH today" → future insights can attribute spikes to *known* events without guessing. Kills the biggest "cause unknown" frustration honestly | S |
-| **Anomaly memory** | Diff engine remembers baselines (best day ever, longest ship streak) → "yesterday was your best traffic day this month" becomes computable, not LLM-claimed | M |
+| **Anomaly memory** | Diff engine reads back `daily_metrics` for baselines and streaks → "third consecutive day without a signup", "your best traffic day this month" become computable, not LLM-claimed. Scoped and deferred 2026-08-11 — see below | M |
 | **More deterministic patterns** | Signup-to-visitor conversion trend, weekend-vs-weekday shape, PR review latency | S each |
+
+#### Anomaly memory — scoped 2026-08-11, deliberately deferred
+
+**The read path is the entire job.** `daily_metrics` is already *written* every
+night by four upserts in `lib/brief/generate.ts`, and read back in exactly one
+place: `app/api/chat/route.ts` (last 14 days, for chat context). The brief
+pipeline itself never reads history — `prev_day`, `week_total`,
+`prev_week_total` and `days_since_last_ship` are all re-fetched live from the
+source APIs on every run. So a brief can compare to yesterday only because it
+re-fetches yesterday. The only genuinely historical value in a brief today is
+`day_number`, a `count(*)` over `briefs`.
+
+Shape when built: one module reading ~35 days of `daily_metrics`, folding a
+`memory` block into `Facts` before `buildLedger`. Put it *inside* `Facts` and
+its numbers join the LLM allowlist for free — `allowedNumbers()` walks the whole
+object. Derived fields: consecutive days without a signup, consecutive shipping
+days, best traffic day in 30d, goal progress (only when the goal parses to a
+single integer *and* signups are connected).
+
+**The trap that caused the deferral — read this before implementing.**
+`daily_metrics` has holes *by design*. When a collector fails, `generate.ts`
+logs, pushes a line into `gaps`, and continues, writing **no row**. A naive
+streak cannot distinguish *"row exists, value 0"* from *"no row at all"*, so a
+single failed Supabase collection on a Tuesday makes Wednesday's brief announce
+"third consecutive day without a signup" — which is false. In a product whose
+entire moat is never printing a wrong number, that is the worst possible bug.
+**A missing row must be treated as unknown and break the streak, not extend it.**
+
+Two more reasons it waited: it does nothing in week one (streaks need 3+ days,
+personal bests ~14) which is exactly when the first cohort decides whether to
+keep opening the email; and it adds a per-user query to the cron hot path, which
+Stage 3 below already flags as failing at 100–200 users.
+
+**Deferring costs nothing.** The history accrues whether or not anything reads
+it, so this can be built at any later point with full retroactive benefit. That
+asymmetry is why it lost to smaller work at launch.
+
+#### Founder context at onboarding — scoped 2026-08-11, deliberately deferred
+
+Capture `stage` (idea / building / launched / revenue) and a one-line
+`description`, so advice can be situated — "talk to yesterday's signups" is
+right for B2C and useless for an enterprise sales motion.
+
+**Why it waited:** `goal` today only tints prose. It is read in `generate.ts`
+into `facts.founder_goal` and by one prompt line, and — before 2026-08-11 —
+`baselinePriorities` never read it at all, so on the deterministic path it did
+nothing whatsoever. Adding two more context fields would have fed the same weak
+mechanism. Making the existing field bite came first: `baselinePriorities` now
+applies a goal-theme bonus to candidate ranking, which is the only place `goal`
+reaches the deterministic path. Re-evaluate these fields against *that* baseline,
+not the old one.
+
+**Staleness is the real risk.** Self-declared `stage` rots silently: a founder
+who taps "Building" and launches two months later gets confidently mis-staged
+advice indefinitely, and the model will lean on it. Stale declared state is
+worse than absent state. Either re-prompt periodically, or infer stage from
+which integrations are connected plus whether Stripe shows revenue — which is
+free and never goes stale.
+
+**Security, when this lands.** `description` is attacker-controlled free text in
+a public multi-tenant product, flowing into an LLM instruction. The
+prompt-injection clause in `generate.ts` currently names only PR titles and
+`founder_goal` and must be extended to cover it. The chat route
+(`app/api/chat/route.ts`) selects only `goal` today; if `description` is added
+to that context too, its own injection clause needs the same treatment. Cap the
+field length in the Zod schema, as `goal` already is at 200.
 
 ### 1c. Delivery surfaces
 

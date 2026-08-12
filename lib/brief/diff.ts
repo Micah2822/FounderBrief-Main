@@ -171,19 +171,77 @@ export function baselineInsight(facts: Facts): string {
   return parts.join(" ");
 }
 
-/** Baseline priorities: derived from open work and gaps, never invented. */
+// ── Priorities: ranked, never padded ──────────────────────────────────
+
+/** What a priority is *about* — used to match it against the founder's goal. */
+type PriorityKind = "growth" | "shipping" | "none";
+
+type Candidate = { text: string; score: number; kind: PriorityKind };
+
+/**
+ * Below this, a candidate isn't worth one of a founder's three morning slots.
+ * Set just under the weakest real signal (a fresh open PR, 30) so that generic
+ * advice never rides along beside something concrete.
+ */
+const PRIORITY_FLOOR = 25;
+
+/** How much a goal match moves a priority up the list. */
+const GOAL_BONUS = 15;
+
+/**
+ * Goal text → the kinds of priority that goal favours. Deliberately coarse:
+ * it reorders candidates the facts already justify, and can never introduce one.
+ */
+const GOAL_THEMES: { pattern: RegExp; kinds: PriorityKind[] }[] = [
+  { pattern: /user|signup|sign-up|customer|subscriber|audience|waitlist|growth|grow|traffic|launch/i, kinds: ["growth"] },
+  { pattern: /ship|build|release|mvp|beta|rebuild|rewrite|migrat/i, kinds: ["shipping"] },
+  { pattern: /revenue|paying|money|mrr|monet|sales|charge|pricing/i, kinds: ["growth"] },
+];
+
+/**
+ * The only place the founder's goal reaches the *deterministic* path. Without
+ * it the goal tints the LLM's prose and does nothing whatsoever when the model
+ * is unavailable — which is exactly when the baseline is what ships.
+ */
+function goalBonus(kind: PriorityKind, goal?: string): number {
+  if (!goal || kind === "none") return 0;
+  const favoured = GOAL_THEMES.filter((t) => t.pattern.test(goal)).flatMap((t) => t.kinds);
+  return favoured.includes(kind) ? GOAL_BONUS : 0;
+}
+
+/**
+ * Baseline priorities: derived from open work and gaps, never invented, and
+ * ranked so that position 1 is the one that actually matters.
+ *
+ * Returns 1–3, and deliberately does NOT pad to three. A padded list ends in
+ * generic advice, and a founder who reads "pick the one thing that would make
+ * today a win" at 7am has learned that the brief had nothing to say. One true
+ * instruction beats three where two are filler.
+ */
 export function baselinePriorities(facts: Facts): string[] {
-  const out: string[] = [];
+  const out: Candidate[] = [];
   const g = facts.github;
   const p = facts.product;
   const t = facts.traffic;
 
+  const add = (text: string, score: number, kind: PriorityKind) =>
+    out.push({ text, score: score + goalBonus(kind, facts.founder_goal), kind });
+
+  // The decision-grade pattern: the top of the funnel is fine, the funnel isn't.
   if (
     t && p &&
     t.week_change_pct !== null && t.week_change_pct > 20 &&
     p.week_change_pct !== null && p.week_change_pct <= 0
   ) {
-    out.push("Walk through your signup flow as a new visitor — traffic is arriving but not converting.");
+    add("Walk through your signup flow as a new visitor — traffic is arriving but not converting.", 100, "growth");
+  }
+
+  if (p && p.new_signups === 0 && p.prev_day === 0) {
+    add("Do one distribution task today — signups have stalled.", 85, "growth");
+  }
+
+  if (g && g.days_since_last_ship !== null && g.days_since_last_ship >= 3) {
+    add("Ship something small today to break the drought.", 80, "shipping");
   }
 
   // A channel visibly worked yesterday → repeat it while it's warm.
@@ -195,30 +253,31 @@ export function baselinePriorities(facts: Facts): string[] {
     t.visitors > t.prev_day_visitors * 1.3 &&
     !/direct/i.test(top.source)
   ) {
-    out.push(`Post again where yesterday's spike came from — ${top.source} drove ${top.visitors} visitors.`);
+    add(`Post again where yesterday's spike came from — ${top.source} drove ${top.visitors} visitors.`, 70, "growth");
+  }
+
+  if (p && p.new_signups > 0) {
+    add(`Talk to one of yesterday's ${p.new_signups} new signups — ask what brought them.`, 60, "growth");
   }
 
   if (g?.open_prs.length) {
     const oldest = g.open_prs[0];
-    out.push(
-      oldest.age_days >= 2
-        ? `Review or close PR #${oldest.number} — "${trunc(oldest.title)}" has been open ${oldest.age_days} days.`
-        : `Review open PR #${oldest.number} — "${trunc(oldest.title)}".`
-    );
+    // An old PR is a blocked teammate or a forgotten branch; a fresh one is
+    // just normal work in progress, and rarely the most important thing today.
+    if (oldest.age_days >= 2) {
+      add(`Review or close PR #${oldest.number} — "${trunc(oldest.title)}" has been open ${oldest.age_days} days.`, 55, "shipping");
+    } else {
+      add(`Review open PR #${oldest.number} — "${trunc(oldest.title)}".`, 30, "shipping");
+    }
   }
-  if (g && g.days_since_last_ship !== null && g.days_since_last_ship >= 3) {
-    out.push("Ship something small today to break the drought.");
-  }
-  if (p && p.new_signups > 0) {
-    out.push(`Talk to one of yesterday's ${p.new_signups} new signups — ask what brought them.`);
-  }
-  if (p && p.new_signups === 0 && p.prev_day === 0) {
-    out.push("Do one distribution task today — signups have stalled.");
-  }
-  if (!out.length) {
-    out.push("Pick the one thing that would make today a win, and start there.");
-  }
-  return out.slice(0, 3);
+
+  // Scored below the floor on purpose: it survives only when it is the sole
+  // candidate, and then it stands alone rather than padding a real list.
+  add("Pick the one thing that would make today a win, and start there.", 5, "none");
+
+  const ranked = out.sort((a, b) => b.score - a.score);
+  const kept = ranked.filter((c) => c.score >= PRIORITY_FLOOR).slice(0, 3);
+  return (kept.length ? kept : ranked.slice(0, 1)).map((c) => c.text);
 }
 
 function trunc(s: string, n = 50): string {

@@ -64,17 +64,28 @@ export function BriefView({ brief, greeting }: { brief: Brief; greeting: string 
         <p className="font-serif text-[19px] leading-relaxed">{brief.insight}</p>
       </section>
 
-      {/* Today */}
+      {/* Today — priorities are ranked, so the first one is pulled out. A
+          numbered list of three reads as three equal chores; the whole point
+          is that one of them matters more than the others. */}
       <section className="rise rise-4 mt-10" aria-label="Today's priorities">
         <p className="eyebrow mb-2">Today</p>
-        <ol className="space-y-2">
-          {brief.priorities.map((p, i) => (
-            <li key={i} className="flex gap-3 text-[15px] leading-relaxed">
-              <span className="font-mono text-[12px] text-muted pt-[3px]">{i + 1}.</span>
-              <span>{p}</span>
-            </li>
-          ))}
-        </ol>
+        {brief.priorities.length > 0 && (
+          <div className="border-l-2 border-ink pl-[14px] py-[2px] mb-4">
+            <p className="eyebrow mb-[5px]">The main todo</p>
+            <p className="text-[17px] leading-snug font-medium">{brief.priorities[0]}</p>
+          </div>
+        )}
+        {brief.priorities.length > 1 && (
+          <ol className="space-y-2">
+            {brief.priorities.slice(1).map((p, i) => (
+              <li key={i} className="flex gap-3 text-[15px] leading-relaxed">
+                {/* +2: this list continues the lead, which was number 1. */}
+                <span className="font-mono text-[12px] text-muted pt-[3px]">{i + 2}.</span>
+                <span>{p}</span>
+              </li>
+            ))}
+          </ol>
+        )}
       </section>
 
       {/* Honest gaps */}
