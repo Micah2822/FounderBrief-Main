@@ -9,8 +9,15 @@ export function RefreshBrief() {
 
   async function refresh() {
     setBusy(true);
-    await fetch("/api/brief/generate", { method: "POST" });
+    const res = await fetch("/api/brief/generate", { method: "POST" });
     setBusy(false);
+
+    // Navigate to the brief that was actually produced. When yesterday was
+    // empty the route falls back to an older active day, and the home page
+    // shows the *newest* brief_date — so without this the founder would land
+    // back on the empty one they were trying to get away from.
+    const date = res.ok ? (await res.json())?.brief?.brief_date : null;
+    if (date) router.push(`/?date=${date}`);
     router.refresh();
   }
 

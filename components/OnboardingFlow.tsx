@@ -42,6 +42,20 @@ export function OnboardingFlow({
 
   const canGenerate = (githubConnected && reposSaved) || sbSaved || plSaved || stSaved;
 
+  // Disconnecting re-renders the server component with connected=false, but
+  // React keeps client state across router.refresh() — useState only reads its
+  // initial value on mount. Without this the step kept showing "✓ connected"
+  // until a hard reload, and the flags below still counted a tool that was
+  // gone, so "Generate my first brief" stayed enabled with nothing connected.
+  // (The steps themselves are keyed on the same flags, which remounts them
+  // with fresh internal state.)
+  useEffect(() => {
+    if (!githubConnected) setReposSaved(false);
+    if (!supabaseConnected) setSbSaved(false);
+    if (!plausibleConnected) setPlSaved(false);
+    if (!stripeConnected) setStSaved(false);
+  }, [githubConnected, supabaseConnected, plausibleConnected, stripeConnected]);
+
   async function generateFirst() {
     setGenerating(true);
     setGenError(null);
@@ -57,7 +71,10 @@ export function OnboardingFlow({
     });
     const res = await fetch("/api/brief/generate", { method: "POST" });
     if (res.ok) {
-      router.push("/");
+      // Land on the brief that was produced, not on whatever has the newest
+      // date — when yesterday was empty this will be an older active day.
+      const date = (await res.json())?.brief?.brief_date;
+      router.push(date ? `/?date=${date}` : "/");
       router.refresh();
     } else {
       setGenerating(false);
@@ -80,15 +97,36 @@ export function OnboardingFlow({
       {/* Order is the onboarding order: the two one-click connections first, then
           the optional pasted keys. Step numbers are derived from position so
           reordering can't leave a stale label behind. */}
-      <GitHubStep step={1} connected={githubConnected} initialRepos={githubRepos} onSaved={() => setReposSaved(true)} />
+      {/* Keyed on the connected flag so a disconnect remounts the step with
+          fresh state instead of leaving its stale "saved" value on screen.
+          Deliberately not keyed on `pickingProject`, which changes mid-flow and
+          would throw away the project list the user is choosing from. */}
+      <GitHubStep
+        key={`github-${githubConnected}`}
+        step={1}
+        connected={githubConnected}
+        initialRepos={githubRepos}
+        onSaved={() => setReposSaved(true)}
+      />
       <SupabaseStep
+        key={`supabase-${supabaseConnected}`}
         step={2}
         connected={supabaseConnected}
         pickingProject={supabasePickingProject}
         onSaved={() => setSbSaved(true)}
       />
-      <StripeStep step={3} connected={stripeConnected} onSaved={() => setStSaved(true)} />
-      <PlausibleStep step={4} connected={plausibleConnected} onSaved={() => setPlSaved(true)} />
+      <StripeStep
+        key={`stripe-${stripeConnected}`}
+        step={3}
+        connected={stripeConnected}
+        onSaved={() => setStSaved(true)}
+      />
+      <PlausibleStep
+        key={`plausible-${plausibleConnected}`}
+        step={4}
+        connected={plausibleConnected}
+        onSaved={() => setPlSaved(true)}
+      />
 
       <section className="rise rise-5 border-t border-line pt-8">
         <p className="eyebrow mb-3">Step 5 — Your first brief</p>
@@ -231,7 +269,10 @@ function GitHubStep({
           </a>
         </>
       ) : saved ? (
-        <Done text={`Watching ${initialRepos.length > 0 ? initialRepos.join(", ") : selected.join(", ")}`} />
+        <Done
+          provider="github"
+          text={`Watching ${initialRepos.length > 0 ? initialRepos.join(", ") : selected.join(", ")}`}
+        />
       ) : (
         <>
           <p className="text-[14px] text-muted leading-relaxed mb-4 max-w-md">
@@ -373,7 +414,7 @@ function SupabaseStep({
     <section className={`rise rise-${step} border-t border-line pt-8`}>
       <p className="eyebrow mb-3">Step {step} — Supabase</p>
       {saved ? (
-        <Done text={table ? `Counting new rows in "${table}"` : "Signups connected"} />
+        <Done provider="supabase" text={table ? `Counting new rows in "${table}"` : "Signups connected"} />
       ) : !tables && loadingProjects ? (
         // Without this the connect button flashes back up while the project
         // list is still in flight, which reads as though the connect failed.
@@ -399,6 +440,22 @@ function SupabaseStep({
               </option>
             ))}
           </select>
+          {/* Choosing a project mints a key and reads its schema, which takes a
+              few seconds. The placeholder option carries a busy label, but the
+              select shows the *chosen* project once one is picked — so without
+              this the wait looks like nothing happening, and people click past
+              it before the table list arrives. */}
+          {busy && (
+            <p className="text-[13px] text-faint mt-2" role="status" aria-live="polite">
+              Reading your project&rsquo;s tables
+              <span className="dots font-mono" aria-hidden>
+                <span>.</span>
+                <span>.</span>
+                <span>.</span>
+              </span>{" "}
+              this takes a few seconds.
+            </p>
+          )}
         </>
       ) : !tables && projects ? (
         <p className="text-[14px] text-muted leading-relaxed max-w-md">
@@ -546,7 +603,7 @@ function PlausibleStep({
     <section className={`rise rise-${step} border-t border-line pt-8`}>
       <p className="eyebrow mb-3">Step {step} — Website traffic</p>
       {saved ? (
-        <Done text={domain ? `Tracking visitors on ${domain}` : "Analytics connected"} />
+        <Done provider="plausible" text={domain ? `Tracking visitors on ${domain}` : "Analytics connected"} />
       ) : (
         <>
           <p className="text-[14px] text-muted leading-relaxed mb-4 max-w-md">
@@ -640,7 +697,7 @@ function StripeStep({
     <section className={`rise rise-${step} border-t border-line pt-8`}>
       <p className="eyebrow mb-3">Step {step} — Revenue</p>
       {saved ? (
-        <Done text="Tracking revenue and new customers" />
+        <Done provider="stripe" text="Tracking revenue and new customers" />
       ) : (
         <>
           <p className="text-[14px] text-muted leading-relaxed mb-4 max-w-md">
@@ -674,11 +731,42 @@ function StripeStep({
   );
 }
 
-function Done({ text }: { text: string }) {
+function Done({ text, provider }: { text: string; provider?: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+
+  // Undoing a connection used to mean leaving onboarding for Settings, which
+  // is a long way to go to correct a mis-picked table two seconds after
+  // picking it. The endpoint already exists; only the affordance was missing.
+  async function disconnect() {
+    if (!provider) return;
+    setBusy(true);
+    const res = await fetch("/api/integrations/supabase", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider }),
+    });
+    // On success the refresh remounts this step, so `busy` goes with it. On
+    // failure nothing remounts, and leaving it set would disable the button
+    // permanently with no explanation.
+    if (!res.ok) setBusy(false);
+    router.refresh();
+  }
+
   return (
-    <p className="text-[14px] flex items-center gap-2">
+    <p className="text-[14px] flex items-center gap-2 flex-wrap">
       <span className="text-ledger font-mono">✓</span>
       <span>{text}</span>
+      {provider && (
+        <button
+          type="button"
+          onClick={disconnect}
+          disabled={busy}
+          className="font-mono text-[12px] text-faint hover:text-ink transition-colors disabled:opacity-50"
+        >
+          {busy ? "Disconnecting…" : "Disconnect"}
+        </button>
+      )}
     </p>
   );
 }

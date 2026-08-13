@@ -61,6 +61,32 @@ export async function collectProduct(
   return { new_signups, total_signups, table };
 }
 
+/**
+ * When the most recent row was created, or null if the table is empty or
+ * unreadable.
+ *
+ * Without this the brief could only say "no new signups for two days", which is
+ * true whenever yesterday and the day before were both empty — and reads as
+ * though signups stopped on Monday even when the last one was months ago. The
+ * founder's real question is "how long has it been", and that needs the actual
+ * date, not the absence of two.
+ */
+export async function lastRowAt(
+  url: string,
+  key: string,
+  table: string,
+  tsColumn: string
+): Promise<string | null> {
+  const u = new URL(`${url.replace(/\/$/, "")}/rest/v1/${table}`);
+  u.searchParams.set("select", tsColumn);
+  u.searchParams.set("order", `${tsColumn}.desc`);
+  u.searchParams.set("limit", "1");
+  const res = await fetch(u, { headers: headers(key), cache: "no-store" });
+  if (!res.ok) return null;
+  const rows = await res.json();
+  return rows?.[0]?.[tsColumn] ?? null;
+}
+
 export async function countInWindow(
   url: string,
   key: string,

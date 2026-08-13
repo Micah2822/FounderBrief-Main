@@ -1,12 +1,20 @@
 // ── Collected facts ────────────────────────────────────────────────────
 
 export type GitHubDayData = {
+  // False when the tracked repos show no PR activity at all (none open, none
+  // merged in 30 days) — i.e. the founder pushes straight to the default
+  // branch. Optional so briefs stored before this existed still deserialize.
+  uses_prs?: boolean;
   prs_merged: number;
   merged_titles: string[];
   commits: number;
   deployments: number;
   open_prs: { number: number; title: string; repo: string; age_days: number }[];
   repos: string[];
+  // Repos whose commits could not be read (permissions, or removed from the
+  // installation). Present so `commits` is never silently understated — an
+  // unread repo is a gap, not a zero.
+  unreadable_repos?: string[];
 };
 
 export type ProductDayData = {
@@ -39,6 +47,9 @@ export type Facts = {
     days_since_last_ship: number | null; // days since a merge or deploy
   };
   product?: ProductDayData & {
+    // Days between the brief's date and the most recent signup. Null when the
+    // table is empty or couldn't be read — never treat null as zero.
+    days_since_last_signup: number | null;
     prev_day: number;
     week_total: number;
     prev_week_total: number;

@@ -58,12 +58,24 @@ export function buildLedger(facts: Facts): LedgerRow[] {
 
   if (facts.github) {
     const g = facts.github;
-    rows.push({ label: "Pull requests merged", value: String(g.prs_merged) });
+    // Commits first: it is the one shipping figure that means the same thing
+    // in every workflow. A merged PR's commits land on the default branch too,
+    // so this already counts PR work — it is not an alternative to the PR row,
+    // it is the superset.
     rows.push({ label: "Commits pushed", value: String(g.commits) });
-    if (g.deployments > 0) {
-      rows.push({ label: "Deployments", value: String(g.deployments) });
+
+    // Always shown, including at zero. Hiding it on quiet days meant "nothing
+    // deployed" — the thing a founder most needs to notice — was the only
+    // state that rendered as absence rather than as a number.
+    rows.push({ label: "Deployments", value: String(g.deployments) });
+
+    // Only for founders who actually work through PRs. `uses_prs` is absent on
+    // briefs generated before it existed; treat that as "yes" so old briefs
+    // re-render unchanged.
+    if (g.uses_prs !== false) {
+      rows.push({ label: "Pull requests merged", value: String(g.prs_merged) });
+      rows.push({ label: "Open pull requests", value: String(g.open_prs.length) });
     }
-    rows.push({ label: "Open pull requests", value: String(g.open_prs.length) });
   }
 
   return rows;
@@ -72,11 +84,35 @@ export function buildLedger(facts: Facts): LedgerRow[] {
 export function findGaps(facts: Facts): string[] {
   const gaps: string[] = [];
   const g = facts.github;
-  if (g && g.days_since_last_ship !== null && g.days_since_last_ship >= 3) {
-    gaps.push(`Nothing has shipped in ${g.days_since_last_ship} days.`);
+  if (g && g.days_since_last_ship !== null) {
+    const quiet = g.commits === 0 && g.deployments === 0 && g.prs_merged === 0;
+    const n = g.days_since_last_ship;
+    if (quiet && n > 0) {
+      // The daily email keeps an honest date, so on a quiet day its ledger is
+      // all zeroes. This line is what stops that being a dead end: it says
+      // when the founder last did something, which is real information and is
+      // never itself a zero. Costs nothing extra — days_since_last_ship is
+      // already collected.
+      gaps.push(
+        `Nothing was pushed or deployed — the last activity was ${n} day${n === 1 ? "" : "s"} ago.`
+      );
+    } else if (n >= 3) {
+      gaps.push(`Nothing has shipped in ${n} days.`);
+    }
   }
-  if (facts.product && facts.product.new_signups === 0 && facts.product.prev_day === 0) {
-    gaps.push("No new signups for two days.");
+  const p = facts.product;
+  if (p && p.new_signups === 0 && p.prev_day === 0) {
+    // "No new signups for two days" was true whenever both days were empty —
+    // including when the last signup was months ago, which it implied was
+    // Monday. Say how long it has actually been.
+    const n = p.days_since_last_signup;
+    if (p.total_signups === 0) {
+      gaps.push("No signups yet.");
+    } else if (n !== null && n >= 2) {
+      gaps.push(`No new signups in ${n} days.`);
+    } else {
+      gaps.push("No new signups yesterday or the day before.");
+    }
   }
   if (!facts.product && !facts.traffic) {
     gaps.push("No user data is connected — signups and traffic aren't being tracked.");

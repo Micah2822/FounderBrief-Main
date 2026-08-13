@@ -1,6 +1,8 @@
+import Link from "next/link";
 import type { Brief } from "@/lib/types";
 import { formatBriefDate } from "@/lib/dates";
 import { Wordmark } from "@/components/Wordmark";
+import { TodayBrief } from "@/components/TodayBrief";
 
 export function BriefView({
   brief,
@@ -24,10 +26,26 @@ export function BriefView({
           {/* The date is the period the brief covers, not the day it was
               issued — a masthead reads as an issue date unless it says
               otherwise, which is exactly how it gets misread. */}
-          <span>
-            No. {brief.day_number} ·{" "}
-            {brief.partial ? "Today so far" : "Covering"}{" "}
-            {formatBriefDate(brief.brief_date)}
+          <span className="flex items-baseline gap-x-2">
+            <span>
+              No. {brief.day_number} ·{" "}
+              {brief.partial ? "Today so far" : "Covering"}{" "}
+              {formatBriefDate(brief.brief_date)}
+            </span>
+            {/* Sits against the date because that is where the ambiguity lives:
+                switching what you are looking at, not an action among actions
+                in the footer. Hidden on a specimen, which has no live data
+                behind it, and while already viewing today.
+
+                The middot matches the masthead's own separators, so the
+                control reads as a distinct item rather than more of the date
+                string running on. */}
+            {!sample && !brief.partial && (
+              <>
+                <span aria-hidden>·</span>
+                <TodayBrief />
+              </>
+            )}
           </span>
         </p>
       </header>
@@ -109,6 +127,17 @@ export function BriefView({
               {g}
             </p>
           ))}
+          {/* A missing connector belongs here, as a quiet offer next to the
+              other honest gaps — never as a priority. "Connect another tool"
+              is our interest, not the founder's work for the day. */}
+          {brief.gaps.some((g) => g.includes("isn't connected") || g.includes("is connected")) && (
+            <Link
+              href="/onboarding"
+              className="inline-block mt-3 font-mono text-[12px] text-muted hover:text-ink transition-colors"
+            >
+              Connect a tool →
+            </Link>
+          )}
         </footer>
       )}
     </article>

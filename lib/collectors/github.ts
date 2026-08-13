@@ -75,6 +75,7 @@ export async function collectGitHub(
   // Commits + deployments per repo within the local-day window
   let commits = 0;
   let deployments = 0;
+  const unreadable: string[] = [];
   for (const repo of repos) {
     try {
       const c = await gh(token, `/repos/${repo}/commits`, {
@@ -83,8 +84,12 @@ export async function collectGitHub(
         per_page: "100",
       });
       commits += Array.isArray(c) ? c.length : 0;
-    } catch {
-      // empty repos 409 — count as zero
+    } catch (e) {
+      // A 409 is a genuinely empty repository and really is zero commits.
+      // Anything else — a 403 from a missing Contents permission, a 404 from a
+      // repo that left the installation — is a failure to read, and reporting
+      // that as "0 commits" is the one thing this brief must never do.
+      if (!/ → 409$/.test(String(e))) unreadable.push(repo);
     }
     try {
       const d = await gh(token, `/repos/${repo}/deployments`, { per_page: "50" });
@@ -100,7 +105,19 @@ export async function collectGitHub(
   }
 
   const now = Date.now();
+
+  // Does this founder work through pull requests at all? Pushing straight to
+  // main is normal for a solo founder, and for them "Pull requests merged: 0"
+  // and "Open pull requests: 0" are not information — they are two permanent
+  // zeroes at the top of the ledger, crowding out the rows that do move.
+  const usesPrs =
+    openPrs.length > 0 ||
+    closed
+      .flat()
+      .some((p) => p.merged_at && now - new Date(p.merged_at).getTime() <= 30 * 86400000);
+
   return {
+    uses_prs: usesPrs,
     prs_merged: mergedInWindow.length,
     // Titles are third-party-writable text (anyone can open a PR) — cap them
     // to shrink the prompt-injection surface before they reach the LLM.
@@ -114,6 +131,7 @@ export async function collectGitHub(
       age_days: Math.floor((now - new Date(p.created_at).getTime()) / 86400000),
     })),
     repos,
+    ...(unreadable.length ? { unreadable_repos: unreadable } : {}),
   };
 }
 
@@ -145,21 +163,43 @@ export async function countCommits(
   return counts.reduce((a, b) => a + b, 0);
 }
 
-/** Days since the last merged PR, across the tracked repos. */
+/**
+ * Days since anything last shipped, across the tracked repos.
+ *
+ * "Shipped" is the most recent of a **deployment**, a **merged PR**, or a
+ * **commit on the default branch** — in that order of meaning, but whichever is
+ * latest wins. Counting merged PRs alone returns `null` forever for anyone who
+ * pushes straight to main, which silently disables every downstream use of this
+ * number: the "nothing has shipped in N days" gap, the matching insight, and
+ * the priority that tells the founder to break the drought. A solo founder
+ * pushing to main is the common case, not the exception.
+ */
 export async function daysSinceLastShip(
   token: string,
   repos: string[],
   today: string
 ): Promise<number | null> {
-  const closed = await Promise.all(repos.map((r) => listPulls(token, r, "closed")));
-  const lastMerged = closed
-    .flat()
-    .map((p) => p.merged_at)
-    .filter((d): d is string => !!d)
-    .sort()
-    .reverse()[0];
-  if (!lastMerged) return null;
-  const last = new Date(`${lastMerged.slice(0, 10)}T12:00:00Z`);
+  const perRepo = await Promise.all(
+    repos.map(async (repo) => {
+      const [closed, deployments, commits] = await Promise.all([
+        listPulls(token, repo, "closed"),
+        gh(token, `/repos/${repo}/deployments`, { per_page: "1" }).catch(() => []),
+        gh(token, `/repos/${repo}/commits`, { per_page: "1" }).catch(() => []),
+      ]);
+      const dates: string[] = closed.map((p) => p.merged_at).filter((d): d is string => !!d);
+      const deploy = Array.isArray(deployments) ? deployments[0]?.created_at : null;
+      if (deploy) dates.push(deploy);
+      // committer.date is when it landed on the branch, which is the shipping
+      // moment; author.date can be far older on a rebase or a cherry-pick.
+      const commit = Array.isArray(commits) ? commits[0]?.commit?.committer?.date : null;
+      if (commit) dates.push(commit);
+      return dates;
+    })
+  );
+
+  const latest = perRepo.flat().sort().reverse()[0];
+  if (!latest) return null;
+  const last = new Date(`${latest.slice(0, 10)}T12:00:00Z`);
   const ref = new Date(`${today}T12:00:00Z`);
   return Math.max(0, Math.round((ref.getTime() - last.getTime()) / 86400000));
 }

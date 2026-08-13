@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { generateBriefForUser } from "@/lib/brief/generate";
 import { sendBriefEmail } from "@/lib/email/send";
 import { addDays, localDateString, localHour } from "@/lib/dates";
+import type { Brief } from "@/lib/types";
 
 // 60s is the Vercel Hobby-plan cap and handles ~30 users per tz-hour.
 // On Pro, raise to 300; past that, see POST_MVP.md → Stage 3 (queue).
@@ -42,13 +43,27 @@ export async function GET(request: Request) {
         .eq("brief_date", briefDate)
         .maybeSingle();
 
-      const brief = existing?.content ?? (await generateBriefForUser(u.user_id, briefDate));
+      // A stored brief is reused so a tick that fires twice in the same hour
+      // doesn't regenerate and re-bill the LLM. A *partial* row is the one
+      // exception: it froze a day mid-evening, so reusing it means the
+      // finished day is never collected. That is how a day with commits in it
+      // got emailed as a zero. Partial briefs are still stored (the UI reads
+      // them back from here), so this is what makes them self-heal.
+      const stale = (existing?.content as Brief | undefined)?.partial === true;
+      const brief =
+        existing?.content && !stale
+          ? (existing.content as Brief)
+          : await generateBriefForUser(u.user_id, briefDate);
       if (!brief) {
         results[u.user_id] = "no-integrations";
         continue;
       }
 
-      if (u.email_enabled && !existing?.emailed_at) {
+      // A partial that was already emailed sent the wrong numbers, so the
+      // corrected brief should go out rather than being suppressed by the
+      // emailed_at stamp the bad one left behind.
+      const alreadyEmailed = !stale && !!existing?.emailed_at;
+      if (u.email_enabled && !alreadyEmailed) {
         const { data: userRow } = await db.auth.admin.getUserById(u.user_id);
         const email = userRow?.user?.email;
         if (email && (await sendBriefEmail(email, brief))) {

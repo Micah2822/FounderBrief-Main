@@ -148,13 +148,34 @@ only and never queries a table.
 
 A `user_settings` row is created by an `auth.users` insert trigger (migration
 `0002`), **not** by application code — a user without one silently receives
-nothing forever, which is why it lives in the database.
+nothing forever, which is why it lives in the database. That function is
+`security definer`, so `0002` also revokes `execute` from `public`, `anon` and
+`authenticated`: PostgREST would otherwise publish it at
+`/rest/v1/rpc/handle_new_user`. A trigger runs as the table owner and never
+consults `execute`, so the revoke costs nothing.
+
+Supabase's own `public.rls_auto_enable()` (installed by the automatic-RLS
+project setting) raises the same linter warning and has had the same `revoke`
+applied by hand — **not** in a migration, since it isn't our object. That one is
+a false positive either way: it `RETURNS EVENT_TRIGGER`, a pseudo-type Postgres
+refuses to invoke directly, so it was never callable regardless of grants.
+Run `get_advisors` after any DDL; two warnings remain and neither is actionable
+(the other is leaked-password protection, which does not apply to OTP sign-in).
+
+**Migrations are applied by hand and nothing records which have run** —
+`list_migrations` on the project is empty, so the files under
+`supabase/migrations/` are effectively the setup script and the only source of
+truth. Two consequences: run them in filename order on any new environment, and
+never write a migration that creates a problem and then fixes it in a later
+file, because there is no mechanism guaranteeing the later one is ever applied.
+Adopting the Supabase CLI would remove this caveat.
 
 ### `daily_metrics` is written but barely read
 
 The pipeline upserts a row per source per day, and the **only** consumer is
 `app/api/chat/route.ts` (last 14 days). The brief pipeline never reads history:
-`prev_day`, `week_total`, `prev_week_total` and `days_since_last_ship` are all
+`prev_day`, `week_total`, `prev_week_total`, `days_since_last_ship` and
+`days_since_last_signup` are all
 re-fetched live from the source APIs on every run. A brief can compare to
 yesterday only because it re-fetches yesterday.
 
@@ -179,7 +200,9 @@ row is not a zero.
 3. **Collect** from each connected source in parallel, each in its own
    `try/catch`. A failure pushes a line into `facts.gaps` and continues —
    **it does not write a `daily_metrics` row.**
-4. **Store** each source's data as a `daily_metrics` upsert.
+4. **Store** each source's data as a `daily_metrics` upsert — **skipped entirely
+   on a partial run**, which measures a slice of a day and must never stamp it
+   onto the row representing the whole day (see [Partial briefs](#partial-briefs)).
 5. **Compose** — `buildLedger()`, `baselineInsight()`, `baselinePriorities()`.
 6. **Polish (optional)** — `polishWithLLM()` rewrites insight and priorities.
    Two attempts, validated against the allowlist; on failure the baseline wins.
@@ -216,9 +239,51 @@ which lists user IDs — must never be echoed.
 
 `{ partial: true }` covers midnight→now and compares against **the same hours**
 of the previous day, never against a whole day — otherwise every mid-afternoon
-brief shows a fake decline. Used by the manual generate route when yesterday's
-ledger is entirely empty, so a founder who connects at 3pm sees activity they
-recognise rather than a page of zeroes. The 7am email never takes this path.
+brief shows a fake decline.
+
+**A partial run never writes `daily_metrics`.** That row represents a whole day,
+`chat` reads fourteen of them, and nothing revisits it to correct a slice. The
+*brief* is still stored, because the UI re-reads it from the database — and it
+is safe to store only because the cron regenerates over any row still flagged
+`partial`. Both halves are load-bearing: with the brief unsaved the founder sees
+nothing, and without the cron guard a brief generated at 22:15 froze that day at
+22:15 and was emailed as final the next morning, hiding a commit pushed at 22:28.
+
+### Choosing which day an on-demand brief covers
+
+`/api/brief/generate` covers **yesterday**, and falls forward to **today so
+far** only when yesterday's ledger is entirely zero. `?today=1` asks for today
+directly and skips the fallback, because an empty "today so far" at 9am is the
+honest answer to the question that was asked.
+
+**It never falls backwards.** An earlier version searched for the last day with
+any activity and generated a brief for that instead — which meant a founder
+whose repo had been quiet for three weeks opened the page and was shown
+`No. 3 · Covering Sun, Jul 26`. Arithmetically correct, and it reads as the
+product losing track of what day it is. How long it has been is genuinely useful
+information, but its useful form is the sentence "the last activity was 17 days
+ago", not a brief dated three weeks back. A quiet day should look quiet.
+
+Because the fallback changes the date, the route's callers navigate to
+`/?date=<brief_date>` from the response rather than to `/`, which shows the
+newest `brief_date`.
+
+`isEmptyLedger()` ignores rows listed in `STANDING_ROWS` — currently "Open pull
+requests". A standing count is the same number whether or not the founder did
+anything that day, so counting it as activity would suppress the fallback on a
+genuinely quiet day. Add any future state-not-activity row to that set.
+
+**What a quiet day actually shows**, with no date-shifting anywhere: a ledger of
+zeroes, plus `Nothing was pushed or deployed — the last activity was N days
+ago`, plus `No new signups in N days`, plus an insight and one real instruction
+("Ship something small today to break the drought"). That is the intended
+answer to "a new user must never see zeros and no insight" — the zeroes are
+true, and the surrounding lines carry the meaning. Resist adding more.
+
+**The 7am email never falls forward either.** At 7am "today" is three hours old
+and essentially always empty. The email states yesterday's date and carries the
+last-activity line in `gaps`, so a quiet morning is informative without being
+re-dated.
 
 ---
 
@@ -249,6 +314,24 @@ clears the floor, return exactly the top scorer. Never zero, never four.
 The floor sits just under the weakest real signal (fresh PR, 30) so the generic
 fallback can never ride along beside a concrete instruction. On a quiet day the
 brief says one true thing and stops.
+
+### Connecting a tool is never a priority
+
+There is no candidate for it in the scorer, and the LLM is forbidden from
+inventing one — by a rule in the system prompt *and* by `isConnectorChore()` in
+`lib/brief/generate.ts`, which drops any priority naming a provider **and** a
+setup word before validation. If that empties the list, the whole polish attempt
+is rejected and the deterministic baseline ships.
+
+Enforced twice because the prompt alone is a request, not a guarantee, and this
+failure is self-selecting: it surfaces on the quiet days when there is least
+else to say, and lands in `priorities[0]` — the lead. A founder opened their
+brief and was told THE MAIN TODO was "Address analytics connection". That is our
+data-collection problem wearing their to-do list. `gaps` already states what
+isn't connected, quietly, at the foot of the page; it is not a source of work.
+
+The filter needs both halves of the match so a real instruction that happens to
+name a tool ("check Stripe for failed payments") still passes.
 
 **Why the two revenue rules sit where they do.** First revenue is the rarest
 signal a brief can carry and the one most worth acting on the same day, while
@@ -322,6 +405,24 @@ made in both, or they drift.** The lead-priority block is the current example:
 a flat array is deliberate — briefs stored before ranking existed still render,
 with their first item becoming the lead.
 
+**Ledger row order and gating** (`buildLedger()`): users and market first, then
+**Commits pushed**, then **Deployments**, then the two PR rows *only when*
+`uses_prs !== false`. Commits leads the shipping rows because a merged PR's
+commits land on the default branch too — it is the superset, not the
+alternative, and the one figure that means the same thing in every workflow.
+Deployments renders **including at zero**: hiding it on quiet days meant "nothing
+deployed" was the only state that appeared as absence rather than as a number.
+`uses_prs` is absent on briefs stored before it existed, so `!== false` keeps
+those rendering unchanged.
+
+**One animation exists beyond `.rise`:** `.dots` in `globals.css`, three
+staggered-opacity dots used while a connector step waits several seconds for a
+project key and schema read. It is kept typographic rather than a spinner — no
+new shape, no colour — and is disabled under `prefers-reduced-motion` alongside
+`.rise`. Note this is a deliberate exception to `BRANDING.md` §4, which states
+no animation exists besides `.rise` and `transition-colors`; that document has
+not been amended.
+
 ### The masthead
 
 `components/Wordmark.tsx` is the mark-plus-name used by all seven web mastheads
@@ -345,6 +446,34 @@ Two deliberate exceptions:
   because inline SVG is stripped by most clients and a remote image would be
   blocked by default. This is a divergence on purpose — see the drift warning
   above — not an oversight to "fix".
+
+**The masthead date carries a label** — `Covering Thu, Aug 6` or `Today so far`,
+never a bare date. A masthead reads as an *issue* date; this one is the period
+the brief covers, and unlabelled it was read as the page being stale. The email
+masthead says `Covering …` for the same reason.
+
+Beside it, `TodayBrief` (`?today=1`) switches to the day in progress. It sits
+against the date rather than in the footer because it changes *what you are
+looking at*, not what you are doing — separated by the same middot the masthead
+uses elsewhere, and hidden on the specimen and when already viewing today.
+
+Two other web-only controls, both absent from the email because it can't hold
+state or use relative links:
+
+- **`Connect a tool →`** under `gaps`, shown only when a gap says something
+  isn't connected. Deliberately here and nowhere else: see
+  [Connecting a tool is never a priority](#connecting-a-tool-is-never-a-priority).
+- **`Disconnect`** on each connected onboarding step, via the shared `Done`
+  component and the existing `DELETE` endpoint. Correcting a mis-picked table
+  used to mean a trip to Settings.
+
+**Onboarding steps are keyed on their connected flag.** `router.refresh()`
+re-renders the server component with fresh props, but React keeps client state
+across it — `useState` reads its initial value only on mount, so a disconnected
+step went on showing "✓ connected" until a hard reload. The key forces a
+remount; a matching effect clears the parent's copies, which gate the Generate
+button. The Supabase step is deliberately **not** keyed on `pickingProject`,
+which changes mid-flow and would discard the project list being chosen from.
 
 The favicon is a separate, unrelated asset: `app/icon.svg` keeps a black plate
 and does **not** track the theme, because it is drawn on browser chrome and in
@@ -428,11 +557,42 @@ Notable per-source behaviour:
   the shipping half of the brief. Repos are capped at 5, so the extra calls are
   immaterial against a 5,000/hour per-installation budget. PR titles are
   third-party-writable, so they're truncated to 140 chars and capped in count
-  before reaching the LLM. Empty repos 409 on the commits endpoint and count as
-  zero. `countCommits()` exists so the comparison day doesn't refetch every pull
-  request just to read one number.
-- **Supabase (founder's)** — `HEAD` + `Prefer: count=exact` only. Schema
+  before reaching the LLM. `countCommits()` exists so the comparison day doesn't
+  refetch every pull request just to read one number.
+
+  **A 409 on the commits endpoint is an empty repo and really is zero. Anything
+  else is not.** A 403 from a missing `Contents` permission, or a 404 from a
+  repo that left the installation, is a *failure to read* — it surfaces in
+  `unreadable_repos` and becomes a gap, because reporting an unread repo as "0
+  commits" is the one thing this brief must never do.
+
+  **`daysSinceLastShip()` counts a deployment, a merged PR, or a commit on the
+  default branch** — whichever is latest. Counting merged PRs alone returned
+  `null` forever for anyone pushing straight to main, which silently disabled
+  the shipping gap, the shipping insight, *and* the drought priority. Pushing to
+  main is the common case for a solo founder, not the exception.
+
+  **`uses_prs`** is false when the repos show no PR activity at all (none open,
+  none merged in 30 days). The ledger then hides both PR rows, and the LLM is
+  told not to suggest opening or reviewing one. Two permanent zeroes at the top
+  of the ledger are not information — they crowd out the rows that move.
+- **Supabase (founder's)** — counts are `HEAD` + `Prefer: count=exact`. Schema
   discovery reads the PostgREST OpenAPI root.
+
+  **`lastRowAt()` is the one call that is not a count**, and it needs a
+  decision. It issues
+  `?select=<ts>&order=<ts>.desc&limit=1` to find the most recent signup, so the
+  brief can say *"No new signups in 47 days"* instead of *"No new signups for
+  two days"* — the old wording was true whenever yesterday and the day before
+  were both empty, and read as though signups had stopped on Monday when the
+  last one was months ago. Only the derived integer is stored or sent onward;
+  the timestamp is used and discarded server-side.
+  **This conflicts with Invariant 4** ("the founder's database is counted, never
+  read… do not add a collector that selects rows"). Either the invariant should
+  be narrowed deliberately, or this should go back to bucketed `HEAD` counts
+  (fewer, wider windows: 7/30/90 days) which preserve it exactly at the cost of
+  an exact figure. Left as-is pending that call — do not treat its presence as
+  the invariant having been relaxed.
 - **Plausible** — buckets by whole days in the *site's* timezone, so it cannot
   be windowed like the others; partial briefs say so explicitly.
 - **Stripe** — capped at 3 pages/day; sums only the dominant currency rather
@@ -580,12 +740,15 @@ Update this doc in the same change as the code when you:
   Search visibility (robots.txt and a sitemap must agree)
 - change **`lib/sample.ts`** → re-check it against `buildLedger()` and
   `baselinePriorities()`; a demo the engine can't reproduce is a false claim
-- change the **pipeline order**, the partial-brief rule, or LLM validation → the
-  pipeline section and Invariants
+- change the **pipeline order**, the partial-brief rule, **which day a brief
+  covers**, or LLM validation → the pipeline section and Invariants
 - change **auth, RLS, grants, encryption, or rate limits** → Auth and security
 - change the **cron schedule, the workflow, or the production domain** →
   Scheduling
 - fix or newly discover a **silent failure** → Known issues
+- add an **animation, or anything else `BRANDING.md` forbids** → say so in
+  Rendering *and* decide whether the branding rule is being amended or excepted;
+  an undocumented exception is how a design system quietly stops being one
 
 Deferred work with its reasoning belongs in [POST_MVP.md](POST_MVP.md), not here.
 This file describes what *is*.

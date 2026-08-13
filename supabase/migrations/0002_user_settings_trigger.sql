@@ -24,6 +24,14 @@ begin
 end;
 $$;
 
+-- Postgres grants EXECUTE on a new function to PUBLIC by default, and
+-- PostgREST publishes anything in the `public` schema — which together would
+-- expose this SECURITY DEFINER function unauthenticated at
+-- /rest/v1/rpc/handle_new_user. Revoke it: a trigger executes as the table
+-- owner and never consults EXECUTE privileges, so the grant buys nothing and
+-- removing it does not affect signup.
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
+
 drop trigger if exists on_auth_user_created on auth.users;
 
 create trigger on_auth_user_created
