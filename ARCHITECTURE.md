@@ -81,7 +81,7 @@ only automated check that exists today.
 | `RESEND_API_KEY` / `EMAIL_FROM` | the 7am email |
 | `NEXT_PUBLIC_APP_URL` | OAuth redirect URI, email links |
 | `GITHUB_APP_ID` / `GITHUB_APP_SLUG` | GitHub App identity; slug builds the install URL |
-| `GITHUB_APP_PRIVATE_KEY` | signs the RS256 JWT that mints installation tokens; PEM, newlines may be escaped |
+| `GITHUB_APP_PRIVATE_KEY` | signs the RS256 JWT that mints installation tokens; PEM — quote it or escape the newlines, see footguns |
 | `SUPABASE_OAUTH_CLIENT_ID` / `_SECRET` | Management API OAuth — the **founder's** Supabase, not the app's |
 | `CRON_SECRET` | cron bearer token; **fails closed if unset** |
 

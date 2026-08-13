@@ -185,8 +185,32 @@ Owner dropdown — pick the org, not yourself).
    - `GITHUB_APP_ID` — the App ID on the app's settings page
    - `GITHUB_APP_SLUG` — the last path segment of the app's public page
      (`github.com/apps/<slug>`), which is the name lowercased and hyphenated
-   - `GITHUB_APP_PRIVATE_KEY` — the `.pem` contents. If your env UI won't take a
-     multi-line value, replace the newlines with literal `\n`; both forms work.
+   - `GITHUB_APP_PRIVATE_KEY` — the `.pem` contents, **on one line, quoted**:
+
+     ```bash
+     awk '{printf "%s\\n", $0}' ~/Downloads/*.private-key.pem | pbcopy
+     ```
+
+     ```
+     GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIEow...\n-----END RSA PRIVATE KEY-----\n"
+     ```
+
+     Real newlines work too, but **only if the whole block is wrapped in double
+     quotes** — dotenv keeps a multi-line value only when quoted. Unquoted, it
+     silently keeps just the `-----BEGIN` line, which still looks like a PEM
+     until signing fails. Use the single-line form: it behaves identically in
+     `.env.local` and in Vercel's env field.
+
+6. Check it before going further — this validates the ID and key *together* and
+   prints nothing secret:
+
+   ```bash
+   node scripts/check-github-app.mjs
+   ```
+
+   A 401 from `GET /app` means the App ID and the private key don't belong to
+   each other. The most common cause is pasting the **Client ID** (`Iv1.…`) into
+   `GITHUB_APP_ID` — it wants the plain number shown above it.
      To read run; `cat <name>.private-key.pem`
 
 `NEXT_PUBLIC_APP_URL` must match a registered callback's host **exactly** — apex
