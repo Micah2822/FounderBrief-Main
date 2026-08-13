@@ -118,6 +118,7 @@ components/
   BriefView.tsx               The brief, on the web
   Wordmark.tsx                Masthead mark + name; the link home on every page
   Landing.tsx  OnboardingFlow.tsx  SettingsForm.tsx  Chat.tsx
+public/robots.txt             Crawlers get the homepage only (see Search visibility)
 scripts/generate-icons.mjs    Regenerates the favicon PNGs from app/icon.svg
 scripts/audit-stripe-keys.mjs Reports stored Stripe keys that are sk_ not rk_
 scripts/check-github-app.mjs  Validates GITHUB_APP_* and mints a test token
@@ -364,6 +365,45 @@ rank. It previously showed `"Stripe isn't connected — revenue isn't being
 tracked."` — a string `findGaps()` cannot actually produce, advertising a
 limitation the product does not have.
 
+### Search visibility
+
+**Only the homepage is offered to crawlers.** `public/robots.txt` is a static
+file — not Next's generated `app/robots.ts` — and reads:
+
+```
+User-agent: *
+Allow: /$
+Disallow: /
+```
+
+`Allow: /$` matches the root and nothing else; the bare `Disallow: /` covers
+everything below it. Google and Bing resolve the overlap by longest match, so
+Allow wins for `/` alone. Two consequences worth knowing before changing it:
+
+- This governs **crawling, not indexing.** A disallowed URL someone links to can
+  still be listed as a bare link with no description. Hard exclusion needs a
+  `noindex` header, which requires the page to be crawlable to be seen — so the
+  two cannot be combined on one path.
+- `/preview` is public and is the strongest marketing page in the app, but it is
+  currently disallowed along with everything else. That was the deliberate ask,
+  not an oversight.
+
+There is **no sitemap**. If you add one, its URLs must not contradict
+robots.txt — crawlers report that as an error.
+
+The search listing itself comes from `metadata` in `app/layout.tsx`:
+
+| Part | Source | Constraint |
+|---|---|---|
+| Blue link | `title.default` | under ~60 chars or Google truncates it |
+| Grey subtext | `description` | ~150 chars is what gets shown |
+
+`title.template` (`"%s | Founder Brief"`) means **sub-pages must set a bare
+title** — `title: "Privacy"`, not `"Privacy | Founder Brief"` — or the brand
+appears twice. There is no `metadataBase`, no OpenGraph block and no
+`opengraph-image`, so a shared link previews as plain text with no card. That is
+a deliberate omission, not missing work.
+
 ---
 
 ## Collectors
@@ -536,6 +576,8 @@ Update this doc in the same change as the code when you:
 - change what a **brief contains or how it's laid out** → Rendering (and confirm
   both surfaces were changed)
 - change the **masthead, the mark, or the favicon** → Rendering › The masthead
+- change **`robots.txt`, page `metadata`, or add a sitemap** → Rendering ›
+  Search visibility (robots.txt and a sitemap must agree)
 - change **`lib/sample.ts`** → re-check it against `buildLedger()` and
   `baselinePriorities()`; a demo the engine can't reproduce is a false claim
 - change the **pipeline order**, the partial-brief rule, or LLM validation → the

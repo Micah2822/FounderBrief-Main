@@ -56,9 +56,27 @@ export default async function OnboardingPage({
 
   return (
     <main className="mx-auto max-w-[640px] px-6 py-14">
-      <p className="eyebrow border-t-2 border-ink pt-3">
+      {/* A <div>, where the other mastheads use a <p>: sign-out is a POST form,
+          and a <form> is flow content that a <p> cannot legally contain — the
+          browser closes the paragraph early and the row falls apart. */}
+      <div className="eyebrow border-t-2 border-ink pt-3 flex items-baseline justify-between">
         <Wordmark suffix="Setup" />
-      </p>
+        {/* Onboarding is otherwise a dead end. It has no footer, and a "back to
+            brief" link would bounce: app/page.tsx redirects any user with no
+            integrations straight back here. Signing out is the only exit. */}
+        <form action="/auth/signout" method="post">
+          {/* uppercase + tracking are re-applied by hand. The browser's UA
+              stylesheet sets text-transform:none and letter-spacing:normal on
+              form controls, so a <button> does NOT inherit them from .eyebrow
+              the way the landing page's <a href="/login">Sign in</a> does. */}
+          <button
+            type="submit"
+            className="uppercase tracking-[0.14em] hover:text-ink transition-colors"
+          >
+            Sign out
+          </button>
+        </form>
+      </div>
       {connectError && (
         <p className="text-[13px] text-oxide leading-relaxed border border-line rounded-md px-4 py-3 mt-6">
           {connectError}
