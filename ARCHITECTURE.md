@@ -90,6 +90,8 @@ No test framework, no ESLint config, no state library. The automated checks are
 | `GITHUB_APP_PRIVATE_KEY` | signs the RS256 JWT that mints installation tokens; PEM — quote it or escape the newlines, see footguns |
 | `SUPABASE_OAUTH_CLIENT_ID` / `_SECRET` | Management API OAuth — the **founder's** Supabase, not the app's |
 | `CRON_SECRET` | cron bearer token; **fails closed if unset** |
+| `ALERT_EMAIL` | operator failure alerts; **unset = off**, and it is also the recipient |
+| `ENCRYPTION_KEY_OLD` | set **only during a key rotation**; see the runbook in `scripts/rotate-encryption-key.mjs` |
 
 ---
 
@@ -747,6 +749,50 @@ names are validated as Postgres identifiers because they end up in a URL path.
 **Rate limits** — 30 chat messages / 5 min / user (DB-backed, so it holds across
 serverless instances); one manual brief / 30s / user.
 
+**Account deletion is a single `auth.users` delete** (`DELETE /api/account`).
+All six tables cascade from it, so there is no cleanup list to maintain — and
+deliberately so, because a hand-written list is what falls out of date when a
+table is added. Confirmation is the user typing their own email address, not a
+word: it cannot be produced by muscle memory. There is no grace period; a soft
+delete would mean a `deleted_at` column threaded through every query.
+
+Two things deletion cannot reach, and the UI says both: the GitHub App stays
+installed until the user removes it, and Supabase keeps its record of the OAuth
+authorisation. Neither can reach anything once the row is gone.
+
+### Knowing when a brief fails
+
+Two separate things, often confused. One is a status code, one is an email.
+
+**1. The route returns 500 when the whole run fails.** If the cron cannot even
+list its users it returns `500`, not `{ ok: true }`. This is not a feature or a
+notification — it is the route reporting what happened. It previously returned
+200 in that case, claiming success while doing nothing.
+
+There is nothing to configure here and nothing to switch off; "off" would mean
+lying about the outcome. What it *causes* is configurable, but in GitHub rather
+than in this repo: a 500 fails the Action, and GitHub emails the account about a
+failed workflow. Change or silence that under GitHub › Settings › Notifications
+› Actions.
+
+**2. `ALERT_EMAIL` gets an email when individual users fail.** One variable is
+both the switch and the recipient — unset means off. It fires only when at least
+one user errored, so silence is the normal state, and it is wrapped in
+`try/catch` because a broken alert must never become a broken brief.
+
+**Both exist because neither covers the other's case.** If the database is
+unreachable the loop never runs, so no user is ever marked failed and the alert
+email never fires — the total-failure case is exactly the one the email cannot
+see. Conversely a 200 run where three users errored keeps the Action green.
+
+**The alert carries stage names, counts and user ids — never the error text.**
+That is the one design decision in it. A `fetch` error can quote a URL with a
+key in it, a PostgREST error can quote the query, and an OpenAI error can quote
+the prompt, which holds PR titles and `founder_goal`. Detail stays in the Vercel
+logs, which are access-controlled. This is also why the alert needs no retention
+policy and no privacy-page commitment beyond naming it: it creates no new store
+of personal data.
+
 ---
 
 ## Known issues and footguns
@@ -821,6 +867,9 @@ Update this doc in the same change as the code when you:
 - change **auth, RLS, grants, encryption, or rate limits** → Auth and security
 - change the **cron schedule, the workflow, or the production domain** →
   Scheduling
+- add a **table that stores user data** → give it `on delete cascade` on
+  `auth.users(id)`, or `DELETE /api/account` quietly stops being complete and
+  the privacy policy stops being true
 - fix or newly discover a **silent failure** → Known issues
 - add an **animation, or anything else `BRANDING.md` forbids** → say so in
   Rendering *and* decide whether the branding rule is being amended or excepted;

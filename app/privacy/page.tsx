@@ -61,6 +61,19 @@ export default function PrivacyPage() {
         </section>
 
         <section>
+          <p className="eyebrow mb-2">Diagnostics</p>
+          <p className="text-muted">
+            When a brief fails to generate, our server logs record which
+            account it was for, which step failed, and the technical error, so
+            that it can be fixed. Those logs are held by our hosting provider
+            for a short retention period and are used for nothing else. The
+            failure alert we send ourselves is narrower still — a step name, a
+            count, and an account identifier, never the error text and never
+            anything drawn from your brief or your database.
+          </p>
+        </section>
+
+        <section>
           <p className="eyebrow mb-2">Cookies</p>
           <p className="text-muted">
             Only the ones the site cannot work without, and no consent banner,
@@ -91,9 +104,14 @@ export default function PrivacyPage() {
         <section>
           <p className="eyebrow mb-2">Deletion</p>
           <p className="text-muted">
-            Delete your account by emailing us — all briefs, metrics,
-            credentials, and chat history are removed. Disconnecting an
-            integration immediately deletes its stored credential.
+            Delete your account yourself in Settings. It is immediate and
+            permanent: all briefs, metrics, credentials, and chat history are
+            removed, with no grace period and no way back. Disconnecting a
+            single integration immediately deletes its stored credential.
+            Two things sit outside our reach — the Founder Brief GitHub App
+            stays installed on your repositories until you uninstall it in
+            GitHub, and Supabase keeps its own record of the authorisation.
+            Neither can reach anything once your account is gone.
           </p>
         </section>
 

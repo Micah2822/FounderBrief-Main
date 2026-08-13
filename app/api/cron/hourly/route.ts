@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateBriefForUser } from "@/lib/brief/generate";
-import { sendBriefEmail } from "@/lib/email/send";
+import { sendBriefEmail, sendCronAlertEmail } from "@/lib/email/send";
 import { addDays, localDateString, localHour } from "@/lib/dates";
 import type { Brief } from "@/lib/types";
 
@@ -24,12 +24,26 @@ export async function GET(request: Request) {
   }
 
   const db = createAdminClient();
-  const { data: users } = await db
+  const { data: users, error: usersError } = await db
     .from("user_settings")
     .select("user_id, timezone, send_hour, email_enabled")
     .not("onboarded_at", "is", null);
 
+  // Not a feature — the route reporting what happened. This used to return 200,
+  // claiming success while nobody got a brief. A 500 fails the Action, and
+  // GitHub emails about a failed workflow.
+  //
+  // The ALERT_EMAIL alert below cannot cover this case: if we cannot list users
+  // the loop never runs, so nothing is ever marked failed and no alert is sent.
+  // That is why both exist. See ARCHITECTURE › Knowing when a brief fails.
+  if (usersError) {
+    console.error("cron could not list users", usersError);
+    return NextResponse.json({ error: "could not list users" }, { status: 500 });
+  }
+
   const results: Record<string, string> = {};
+  const stageCounts: Record<string, number> = {};
+  const failedUserIds: string[] = [];
 
   for (const u of users ?? []) {
     try {
@@ -80,8 +94,39 @@ export async function GET(request: Request) {
     } catch (e) {
       console.error(`cron failed for ${u.user_id}`, e);
       results[u.user_id] = "error";
+      // Coarse stage, derived from the message, so the alert can say *what*
+      // broke without carrying the message itself — see sendCronAlertEmail.
+      const msg = String(e);
+      const stage = /github/i.test(msg)
+        ? "collect:github"
+        : /supabase|postgrest/i.test(msg)
+          ? "collect:supabase"
+          : /plausible/i.test(msg)
+            ? "collect:plausible"
+            : /stripe/i.test(msg)
+              ? "collect:stripe"
+              : /openai|llm/i.test(msg)
+                ? "llm"
+                : /resend|email/i.test(msg)
+                  ? "email"
+                  : "unknown";
+      stageCounts[stage] = (stageCounts[stage] ?? 0) + 1;
+      failedUserIds.push(u.user_id);
     }
   }
 
+  // Fires only when a user actually failed, so silence is the normal state.
+  // Off entirely unless ALERT_EMAIL is set. Wrapped because a broken alert must
+  // never become a broken brief.
+  if (failedUserIds.length) {
+    try {
+      await sendCronAlertEmail(stageCounts, failedUserIds, Object.keys(results).length);
+    } catch (e) {
+      console.error("cron alert failed to send", e);
+    }
+  }
+
+  // The response body lists user ids and this repo's Actions logs are public,
+  // so the workflow must never echo it — see ARCHITECTURE › Scheduling.
   return NextResponse.json({ ok: true, processed: results });
 }

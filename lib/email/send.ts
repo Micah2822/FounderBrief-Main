@@ -78,6 +78,51 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/**
+ * Emails the operator when a cron run failed some users.
+ *
+ * Configuration is one variable: `ALERT_EMAIL` is both the on/off switch and
+ * the recipient. Unset means no alerts.
+ *
+ * **Never include the error text here.** A fetch error can contain a URL with a
+ * key in it, a PostgREST error can contain the query, and an OpenAI error can
+ * contain the prompt — which holds PR titles and the founder's goal. Sending
+ * stage names, counts and user ids means this email creates no new store of
+ * personal data; the detail stays in the Vercel logs, which are
+ * access-controlled. Adding "just the message, it's easier to debug" would
+ * quietly turn an operational alert into a copy of customer data in an inbox.
+ *
+ * Separate from the 500 the cron returns when a whole run fails — see
+ * ARCHITECTURE › Knowing when a brief fails for why both exist.
+ */
+export async function sendCronAlertEmail(
+  stageCounts: Record<string, number>,
+  affectedUserIds: string[],
+  totalProcessed: number
+): Promise<boolean> {
+  const to = process.env.ALERT_EMAIL;
+  if (!to || !process.env.RESEND_API_KEY) return false;
+
+  const failed = affectedUserIds.length;
+  const stages = Object.entries(stageCounts)
+    .map(([stage, n]) => `${stage.padEnd(16)} ${n}`)
+    .join("\n");
+
+  const { Resend } = await import("resend");
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const { error } = await resend.emails.send({
+    from: process.env.EMAIL_FROM || "Founder Brief <onboarding@resend.dev>",
+    to,
+    subject: `Founder Brief — ${failed} of ${totalProcessed} briefs failed`,
+    text: `${stages}\n\nAffected user ids:\n${affectedUserIds.join("\n")}\n\nDetail is in the Vercel logs for this run.`,
+  });
+  if (error) {
+    console.error("resend alert error", error);
+    return false;
+  }
+  return true;
+}
+
 export async function sendBriefEmail(
   to: string,
   brief: Brief

@@ -311,6 +311,18 @@ npm run dev
 1. Push to GitHub, import into Vercel.
 2. Add all env vars (set `NEXT_PUBLIC_APP_URL` to the production URL and
    `CRON_SECRET` to a random string — `openssl rand -base64 32`).
+
+   **Set `ALERT_EMAIL` to your own address.** Without it you are not told when a
+   brief fails: the failure is caught, logged, and invisible. The same variable
+   is the on/off switch and the recipient — unset it to stop the alerts, change
+   it to redirect them, and redeploy either way. The alert contains a step name,
+   a count and account ids only, never the error itself (see ARCHITECTURE ›
+   Knowing when a brief fails for why).
+
+   Separately, and needing no configuration: if a run fails outright the route
+   returns `500`, the GitHub Action goes red, and GitHub emails you about the
+   failed workflow. Silence or redirect *that* one under GitHub → Settings →
+   Notifications → Actions.
 3. Once you know the production domain, replace `YOURAPP` everywhere it is
    hardcoded outside the repo:
    - Supabase **Site URL** (section 1)
