@@ -14,7 +14,7 @@ export default function PrivacyPage() {
       </p>
 
       <h1 className="font-serif text-[32px] leading-tight mt-10">Privacy policy</h1>
-      <p className="font-mono text-[12px] text-faint mt-2">Last updated July 11, 2026</p>
+      <p className="font-mono text-[12px] text-faint mt-2">Last updated August 13, 2026</p>
 
       <div className="mt-8 space-y-8 text-[15px] leading-relaxed">
         <section>
@@ -31,9 +31,14 @@ export default function PrivacyPage() {
           <p className="eyebrow mb-2">What we never collect</p>
           <p className="text-muted">
             The contents of your database rows. Your connected Supabase project
-            is only ever queried with counts — we cannot see, and never store,
-            your users&apos; names, emails, or any row data. We do not read
-            your source code; only PR titles and activity counts.
+            is queried with counts, and with one exception: we read the
+            timestamp of your most recent row in the single date column you
+            map, so the brief can say how long it has been rather than only
+            &ldquo;no signups today&rdquo;. That timestamp is used to work out a
+            number of days and is not stored. No other column is ever read — we
+            cannot see your users&apos; names, emails, or any other row data.
+            We do not read your source code; only PR titles and activity
+            counts.
           </p>
         </section>
 
@@ -52,6 +57,22 @@ export default function PrivacyPage() {
             The keys we do store are encrypted at rest with AES-256-GCM and are
             never sent to your browser. You can disconnect any integration at
             any time in Settings, which deletes the credential.
+          </p>
+        </section>
+
+        <section>
+          <p className="eyebrow mb-2">Cookies</p>
+          <p className="text-muted">
+            Only the ones the site cannot work without, and no consent banner,
+            because there is nothing here to consent to. We set a session cookie
+            to keep you signed in, short-lived cookies during a connection flow
+            to verify the request came from you, and nothing else. There are no
+            advertising cookies, no analytics cookies, and no third-party
+            trackers on any page. All of them are marked{" "}
+            <span className="font-mono text-[13px]">HttpOnly</span> and{" "}
+            <span className="font-mono text-[13px]">Secure</span>, so they are
+            unreadable to scripts and never sent over an unencrypted
+            connection. Signing out clears them.
           </p>
         </section>
 

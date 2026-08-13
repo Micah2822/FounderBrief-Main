@@ -102,8 +102,9 @@ export function Landing() {
           <p>
             <span className="font-medium">Read your users&apos; data.</span>{" "}
             <span className="text-muted">
-              Your database is only ever counted, never read. Row contents
-              never leave your project.
+              Your database is counted, not read — plus one timestamp, so we can
+              say how long it has been. Names, emails and everything else stay
+              in your project.
             </span>
           </p>
           <p>

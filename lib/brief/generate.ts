@@ -126,7 +126,7 @@ export async function generateBriefForUser(
   // ── Product (founder's Supabase) ─────────────────────────────────────
   if (product?.access_token && product.config?.url && product.config?.table) {
     try {
-      const key = decrypt(product.access_token);
+      const key = decrypt(product.access_token, `${userId} · supabase`);
       const { url, table, ts_column } = product.config;
       const weekRange = { from: dayRangeUTC(addDays(date, -6), tz).from, to: range.to };
       const prevWeekRange = {
@@ -159,7 +159,7 @@ export async function generateBriefForUser(
   // ── Traffic (Plausible) ──────────────────────────────────────────────
   if (traffic?.access_token && traffic.config?.domain) {
     try {
-      const key = decrypt(traffic.access_token);
+      const key = decrypt(traffic.access_token, `${userId} · plausible`);
       const { domain } = traffic.config;
       const prevDate = addDays(date, -1);
       const [day, prevDay, week, prevWeek] = await Promise.all([
@@ -186,7 +186,7 @@ export async function generateBriefForUser(
   // ── Revenue (Stripe) ─────────────────────────────────────────────────
   if (stripe?.access_token) {
     try {
-      const key = decrypt(stripe.access_token);
+      const key = decrypt(stripe.access_token, `${userId} · stripe`);
       const weekRange = { from: dayRangeUTC(addDays(date, -6), tz).from, to: range.to };
       const prevWeekRange = {
         from: dayRangeUTC(addDays(date, -13), tz).from,

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { createClient } from "@/lib/supabase/server";
 import { authorizeUrl, newVerifier } from "@/lib/supabase-oauth";
+import { SECURE_COOKIES } from "@/lib/cookies";
 
 // Starts the Supabase Management API handshake so the user picks a project from
 // a list instead of hunting for a service_role key. PKCE is required by
@@ -25,7 +26,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const secure = appUrl.startsWith("https");
+  const secure = SECURE_COOKIES;
   const res = NextResponse.redirect(url);
   res.cookies.set("sb_oauth_state", state, { httpOnly: true, secure, maxAge: 600, path: "/" });
   res.cookies.set("sb_oauth_verifier", verifier, { httpOnly: true, secure, maxAge: 600, path: "/" });

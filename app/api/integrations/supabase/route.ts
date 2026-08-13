@@ -58,48 +58,19 @@ function usableTables(tables: DiscoveredTable[]) {
   return tables.filter((t) => t.timestamp_columns.length > 0);
 }
 
-// Only real Supabase hosts — this URL is fetched server-side, so an open
-// pattern here would be an SSRF hole (probing internal services through us).
-const urlSchema = z
-  .string()
-  .url()
-  .refine((u) => {
-    try {
-      const parsed = new URL(u);
-      return (
-        parsed.protocol === "https:" &&
-        parsed.port === "" &&
-        /^[a-z0-9-]+\.supabase\.(co|com)$/.test(parsed.hostname)
-      );
-    } catch {
-      return false;
-    }
-  }, "Must be your project URL, e.g. https://abc123.supabase.co");
-
 // Postgres identifiers only — these end up in a URL path we request.
 const identifier = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Invalid name").max(63);
 
-// Step 1: discover — validate credentials and list tables (nothing stored yet)
-const DiscoverSchema = z.object({
-  action: z.literal("discover"),
-  url: urlSchema,
-  key: z.string().min(20),
-});
-
-// Step 2: save — verify the mapping works, then store encrypted
-const SaveSchema = z.object({
-  action: z.literal("save"),
-  url: urlSchema,
-  key: z.string().min(20),
-  table: identifier,
-  ts_column: identifier,
-});
-
-// Supabase project refs are lowercase alphanumeric; this ends up in a hostname.
+// Supabase project refs are lowercase alphanumeric, and this is the **only**
+// thing a caller can influence about the host we fetch. `projectUrl()` builds
+// the URL from it, so this regex is the SSRF guard: without it a caller could
+// point our server at an arbitrary host and probe it through us. There is no
+// longer a path that accepts a full URL from the client.
 const projectRef = z.string().regex(/^[a-z0-9]{16,32}$/, "Invalid project");
 
-// OAuth path: the same two steps, but the key is fetched server-side from the
-// management token rather than pasted, so it never reaches the browser.
+// OAuth is the only path. The project key is fetched server-side from the
+// short-lived management token and never reaches the browser — there is
+// deliberately no way to paste one in; see ARCHITECTURE › Auth and security.
 const SelectProjectSchema = z.object({
   action: z.literal("select-project"),
   project_ref: projectRef,
@@ -196,56 +167,6 @@ export async function POST(request: Request) {
     const res = NextResponse.json({ ok: true });
     res.cookies.delete(TOKEN_COOKIE);
     return res;
-  }
-
-  // ── Manual path (self-hosted Supabase, or anyone who prefers pasting) ──
-
-  if (body.action === "discover") {
-    const parsed = DiscoverSchema.safeParse(body);
-    if (!parsed.success) return NextResponse.json({ error: "Invalid URL or key" }, { status: 400 });
-    try {
-      const usable = usableTables(await discoverSchema(parsed.data.url, parsed.data.key));
-      if (!usable.length) {
-        return NextResponse.json(
-          { error: "Connected, but no tables with a timestamp column were found." },
-          { status: 422 }
-        );
-      }
-      return NextResponse.json({ tables: usable, suggested: suggestMapping(usable) });
-    } catch (e: any) {
-      return NextResponse.json({ error: e.message ?? "Could not connect" }, { status: 502 });
-    }
-  }
-
-  if (body.action === "save") {
-    const parsed = SaveSchema.safeParse(body);
-    if (!parsed.success) return NextResponse.json({ error: "Invalid mapping" }, { status: 400 });
-    const { url, key, table, ts_column } = parsed.data;
-
-    // Verify the mapping actually counts before trusting it
-    try {
-      const now = new Date();
-      await countInWindow(url, key, table, ts_column, new Date(now.getTime() - 86400000), now);
-    } catch {
-      return NextResponse.json(
-        { error: `Couldn't count rows in "${table}" by "${ts_column}". Check the mapping.` },
-        { status: 422 }
-      );
-    }
-
-    const admin = createAdminClient();
-    const { error } = await admin.from("integrations").upsert(
-      {
-        user_id: user.id,
-        provider: "supabase",
-        access_token: encrypt(key),
-        config: { url, table, ts_column },
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id,provider" }
-    );
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ ok: true });
   }
 
   return NextResponse.json({ error: "unknown action" }, { status: 400 });

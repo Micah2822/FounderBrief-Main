@@ -24,8 +24,16 @@ export const SAMPLE_BRIEF: Brief = {
       delta: { text: "+$108 vs prior day", direction: "up" },
     },
     { label: "New customers", value: "4" },
-    { label: "Pull requests merged", value: "2" },
+    // Shipping rows in buildLedger's exact order: commits, then deployments,
+    // then the two PR rows — which appear only because this founder uses pull
+    // requests (`uses_prs`), evidenced by the open PR in the priorities below.
+    // Deployments renders even at zero, so it is never absent when GitHub is
+    // connected. A specimen the engine could not reproduce would be a false
+    // claim about the product, so this list has to track buildLedger exactly.
+    { label: "Commits pushed", value: "14" },
     { label: "Deployments", value: "1" },
+    { label: "Pull requests merged", value: "2" },
+    { label: "Open pull requests", value: "1" },
   ],
   insight:
     "Signups are up 38% week over week (117 vs 85), and four of yesterday's 31 converted to paid — $348, up $108 on the day. Most of the traffic came from Twitter (241 of 412 visitors), so the launch thread is still working. The onboarding branch has been open for 3 days while growth compounds.",

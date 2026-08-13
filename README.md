@@ -234,8 +234,9 @@ How it works, and why it is safe: the management token can read API keys for
 every project in the user's organisation, which is far more authority than the
 brief needs. So it is never stored. It lives in an encrypted, httpOnly,
 10-minute cookie, is used once to fetch the chosen project's key, and is then
-discarded (`lib/supabase-oauth.ts`). What ends up in the database is exactly
-what the manual paste flow would have stored: one project's key.
+discarded (`lib/supabase-oauth.ts`). What ends up in the database is a single
+project's key — see Security below for why that is still the largest asset
+this app holds.
 
 1. Supabase dashboard → **Organization Settings** → **OAuth Apps** →
    **Add application**.
@@ -274,9 +275,12 @@ what the manual paste flow would have stored: one project's key.
 3. Copy the client ID and secret into `.env.local` as
    `SUPABASE_OAUTH_CLIENT_ID` / `SUPABASE_OAUTH_CLIENT_SECRET`.
 
-If these are unset the connect button returns a configuration error, but the
-**Connect manually** path still works — that path also exists permanently for
-self-hosted Supabase, which has no Management API.
+If these are unset the connect button returns a configuration error and Supabase
+cannot be connected at all. **There is no pasted-key fallback.** It was removed
+deliberately: it was the only place a founder was asked to hand a `service_role`
+key to a web form, and its only real audience was self-hosted Supabase, which
+has no Management API. Self-hosted founders land in the "using a different
+tool?" capture on the onboarding page instead.
 
 ### 4. Email delivery
 
@@ -378,8 +382,15 @@ little of that as possible.
   API boundary; `scripts/audit-stripe-keys.mjs` reports any stored before that
   was enforced.
 - **Plausible** — no OAuth exists; its keys are read-only by nature.
-- For the manual Supabase path, recommend founders create a **read-only**
-  Postgres role rather than handing over their service key.
+- **There is no manual Supabase path.** OAuth is the only way to connect, so no
+  founder is ever asked to paste a key into a form. Do not reintroduce one as a
+  convenience.
 - Never expose `SUPABASE_SERVICE_ROLE_KEY`, `ENCRYPTION_KEY`, or integration
   tokens to the client.
+- **Rotating `ENCRYPTION_KEY`:** do not just change it in Vercel. Every stored
+  credential is encrypted with it and becomes permanently unreadable — the only
+  recovery is asking every customer to reconnect. Follow the numbered runbook in
+  the header of `scripts/rotate-encryption-key.mjs`; done in that order it is
+  zero-downtime, because `lib/crypto.ts` accepts `ENCRYPTION_KEY_OLD` alongside
+  the new key for the duration.
 - Only aggregate counts and PR titles reach OpenAI — no end-user PII.

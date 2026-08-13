@@ -26,6 +26,18 @@ Goal: 10 founders reading a *correct* brief every morning. Nothing else.
 
 **Explicitly do NOT build anything else during Stage 0.** Watch, fix, verify.
 
+**If you take the repo private**, two things change and one is a cost. Vercel is
+unaffected — the integration is a GitHub App, so deploys, previews and commit
+metadata all work identically. The gain is that Actions logs stop being public,
+which retires the standing footgun that the cron's `200` body lists user IDs and
+must never be echoed. The cost is that **GitHub Actions minutes are unlimited on
+public repos but metered on private ones** (2,000/month on the free tier), and
+`hourly-brief.yml` is the real brief schedule — roughly 24 short runs a day. That
+should sit inside the free allowance, but it stops being free-by-default, so
+check the actual per-run duration in the Actions tab before assuming. If it ever
+gets tight, the fix is not a longer interval — that silently skips timezones
+(see ARCHITECTURE › Scheduling) — but moving the tick to a cheaper trigger.
+
 ---
 
 ## Stage 1 — Retention (10 → 100 users)

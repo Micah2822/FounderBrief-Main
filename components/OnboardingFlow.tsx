@@ -321,9 +321,6 @@ function SupabaseStep({
   pickingProject: boolean;
   onSaved: () => void;
 }) {
-  const [url, setUrl] = useState("");
-  const [key, setKey] = useState("");
-  const [manual, setManual] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [loadingProjects, setLoadingProjects] = useState(pickingProject && !connected);
   const [projectRef, setProjectRef] = useState("");
@@ -379,16 +376,6 @@ function SupabaseStep({
     else setError(reconnectMessage(data.error, "Couldn't read that project."));
   }
 
-  async function discover(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    const { ok, data } = await post({ action: "discover", url: url.trim(), key: key.trim() });
-    setBusy(false);
-    if (ok) applyTables(data);
-    else setError(data.error ?? "Couldn't connect.");
-  }
-
   function pickTable(t: string, list?: Table[]) {
     setTable(t);
     const cols = (list ?? tables)?.find((x) => x.table === t)?.timestamp_columns ?? [];
@@ -398,11 +385,12 @@ function SupabaseStep({
   async function save() {
     setBusy(true);
     setError(null);
-    const { ok, data } = await post(
-      projectRef
-        ? { action: "save-oauth", project_ref: projectRef, table, ts_column: tsColumn }
-        : { action: "save", url: url.trim(), key: key.trim(), table, ts_column: tsColumn }
-    );
+    const { ok, data } = await post({
+      action: "save-oauth",
+      project_ref: projectRef,
+      table,
+      ts_column: tsColumn,
+    });
     setBusy(false);
     if (ok) {
       setSaved(true);
@@ -468,59 +456,18 @@ function SupabaseStep({
             Point at your product&apos;s database and we&apos;ll count new
             signups. We only ever run counts — never read row contents.
           </p>
-          {!manual ? (
-            <>
-              <a href="/api/integrations/supabase/authorize" className="btn-primary">
-                Connect Supabase
-              </a>
-              <p className="text-[12px] text-faint mt-3">
-                You&apos;ll pick a project from a list — no keys to hunt for. We
-                don&apos;t keep access to your Supabase account afterwards.{" "}
-                <button
-                  type="button"
-                  onClick={() => setManual(true)}
-                  className="underline hover:text-ink"
-                >
-                  Connect manually instead
-                </button>
-                .
-              </p>
-            </>
-          ) : (
-            <>
-              <form onSubmit={discover} className="space-y-3 max-w-md">
-                <input
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://yourproject.supabase.co"
-                  className="field"
-                  aria-label="Supabase project URL"
-                />
-                <input
-                  value={key}
-                  onChange={(e) => setKey(e.target.value)}
-                  type="password"
-                  placeholder="service_role key (stored encrypted)"
-                  className="field"
-                  aria-label="Supabase service role key"
-                />
-                <button type="submit" disabled={!url || !key || busy} className="btn-ghost">
-                  {busy ? "Connecting…" : "Connect Supabase"}
-                </button>
-              </form>
-              <p className="text-[12px] text-faint mt-3">
-                For self-hosted Supabase, which has no management API.{" "}
-                <button
-                  type="button"
-                  onClick={() => setManual(false)}
-                  className="underline hover:text-ink"
-                >
-                  Use the connect button instead
-                </button>
-                .
-              </p>
-            </>
-          )}
+          {/* OAuth only. The pasted-key alternative was removed: it was the one
+              place a founder was asked to hand over a service_role key through
+              a form, it doubled the connect surface, and its only real audience
+              was self-hosted Supabase. A self-hosted founder now lands in
+              ToolRequest instead of being quietly served the least safe path. */}
+          <a href="/api/integrations/supabase/authorize" className="btn-primary">
+            Connect Supabase
+          </a>
+          <p className="text-[12px] text-faint mt-3">
+            You&apos;ll pick a project from a list — no keys to hunt for. We
+            don&apos;t keep access to your Supabase account afterwards.
+          </p>
         </>
       ) : (
         <>

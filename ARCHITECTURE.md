@@ -45,9 +45,15 @@ These are the product, not preferences. Breaking one is a bug even if tests pass
    reads on a bad day. Never move logic into the prompt that the baseline needs.
 3. **No invented causes.** If the data can't explain a change, the brief says
    "cause unknown from connected data". Never a plausible story.
-4. **The founder's database is counted, never read.** `lib/collectors/supabase.ts`
-   issues `HEAD` requests with `Prefer: count=exact`. Row contents never leave
-   the founder's project. Do not add a collector that selects rows.
+4. **The founder's database is counted, not read — with exactly one exception.**
+   `lib/collectors/supabase.ts` issues `HEAD` requests with
+   `Prefer: count=exact`, and `lastRowAt()` selects **one column, one row**: the
+   most recent value of the single date column the founder mapped, used to
+   compute a day count and then discarded. Nothing else is ever selected, and
+   no other column is readable. This exception is narrow, deliberate, and
+   **mirrored in the user-facing promises** on the landing page and the privacy
+   policy — if you widen it, those two pages must change in the same commit, or
+   the product is lying to its users. Do not add a collector that selects rows.
 5. **Idempotent by `(user_id, date)`.** Every write is an upsert on that key.
    This is what makes retries and re-runs safe; keep it.
 6. **Honest gaps.** A missing integration or a failed collection is stated in
@@ -67,8 +73,8 @@ These are the product, not preferences. Breaking one is a bug even if tests pass
 Next.js 14 App Router · React 18 · TypeScript · Tailwind · Supabase
 (Postgres + Auth) · OpenAI · Resend · deployed on Vercel.
 
-No test framework, no ESLint config, no state library. `npx tsc --noEmit` is the
-only automated check that exists today.
+No test framework, no ESLint config, no state library. The automated checks are
+`npx tsc --noEmit` and `npm run check:scoping` (see Auth and security).
 
 ### Environment variables
 
@@ -121,6 +127,8 @@ components/
 public/robots.txt             Crawlers get the homepage only (see Search visibility)
 scripts/generate-icons.mjs    Regenerates the favicon PNGs from app/icon.svg
 scripts/audit-stripe-keys.mjs Reports stored Stripe keys that are sk_ not rk_
+scripts/rotate-encryption-key.mjs  Re-encrypts integrations under a new ENCRYPTION_KEY
+scripts/check-tenant-scoping.mjs   Fails if a service-role query lacks .eq("user_id")
 scripts/check-github-app.mjs  Validates GITHUB_APP_* and mints a test token
 supabase/migrations/          Sequential SQL, applied by hand
 .github/workflows/            hourly-brief.yml — the real brief schedule (see below)
@@ -579,20 +587,20 @@ Notable per-source behaviour:
 - **Supabase (founder's)** — counts are `HEAD` + `Prefer: count=exact`. Schema
   discovery reads the PostgREST OpenAPI root.
 
-  **`lastRowAt()` is the one call that is not a count**, and it needs a
-  decision. It issues
+  **`lastRowAt()` is the one call that is not a count.** It issues
   `?select=<ts>&order=<ts>.desc&limit=1` to find the most recent signup, so the
   brief can say *"No new signups in 47 days"* instead of *"No new signups for
   two days"* — the old wording was true whenever yesterday and the day before
   were both empty, and read as though signups had stopped on Monday when the
-  last one was months ago. Only the derived integer is stored or sent onward;
-  the timestamp is used and discarded server-side.
-  **This conflicts with Invariant 4** ("the founder's database is counted, never
-  read… do not add a collector that selects rows"). Either the invariant should
-  be narrowed deliberately, or this should go back to bucketed `HEAD` counts
-  (fewer, wider windows: 7/30/90 days) which preserve it exactly at the cost of
-  an exact figure. Left as-is pending that call — do not treat its presence as
-  the invariant having been relaxed.
+  last one was months ago. Only the derived integer survives the call.
+
+  This is a **deliberate, documented narrowing of Invariant 4**, and the landing
+  page and privacy policy were both amended to describe it rather than the other
+  way round. That ordering is the point: the promise is the constraint, so a
+  future change here starts by deciding what you are willing to tell users, not
+  by deciding what is convenient to fetch. If you ever want the invariant back
+  in its absolute form, bucketed `HEAD` counts over widening windows
+  (7/30/90 days) give "no signups in over 30 days" while reading nothing.
 - **Plausible** — buckets by whole days in the *site's* timezone, so it cannot
   be windowed like the others; partial briefs say so explicitly.
 - **Stripe** — capped at 3 pages/day; sums only the dominant currency rather
@@ -617,6 +625,27 @@ Notable per-source behaviour:
 
 ## Auth and security
 
+What is in place today, in one list — the sections below give the reasoning:
+
+| Control | Where |
+|---|---|
+| No GitHub credential stored; tokens minted per run | `lib/github/app-auth.ts` |
+| Supabase management token used once, never stored | `lib/supabase-oauth.ts` |
+| No pasted-key path — OAuth is the only way to connect Supabase | `integrations/supabase/route.ts` |
+| Stripe restricted keys only (`rk_`), enforced at the boundary | `integrations/stripe/route.ts` |
+| Credentials AES-256-GCM encrypted at rest | `lib/crypto.ts` |
+| Every decrypt logged with the user id | `lib/crypto.ts` |
+| Zero-downtime key rotation via `ENCRYPTION_KEY_OLD` | `scripts/rotate-encryption-key.mjs` |
+| `Secure` cookie flag from `NODE_ENV`, not from a URL | `lib/cookies.ts` |
+| `anon` / `authenticated` hold no table grants at all | migration `0003` |
+| RLS enabled on all six tables, owner-scoped `select` | migration `0001` |
+| Tenant scoping enforced mechanically | `npm run check:scoping` |
+| `SECURITY DEFINER` functions not callable over the API | migration `0002`, plus a manual revoke on Supabase's `rls_auto_enable()` |
+| SSRF bounded — no endpoint accepts a URL from the client | `projectRef` regex |
+| Prompt-injection clause in both system prompts | `brief/generate.ts`, `api/chat` |
+| Cron bearer token compared with `timingSafeEqual`, fails closed | `api/cron/hourly` |
+| Rate limits: 30 chat/5min, 1 brief/30s | per route |
+
 **Sign-in** is an emailed OTP verified in the browser
 (`app/login/page.tsx`) — not a magic-link redirect. The code length is a
 Supabase *project setting* (currently 8, valid 6–10); never hardcode or truncate
@@ -639,6 +668,11 @@ undo by accident and expensive to undo in public:
   `lib/github/app-auth.ts`. Reverting to an OAuth App would mean the `repo`
   scope — read *and write* on every private repo — because GitHub offers no
   read-only alternative there.
+- **There is no manual/pasted-key path.** OAuth is the only way to connect
+  Supabase. The pasted-key flow was removed: it was the single place a founder
+  was asked to hand a `service_role` key to a web form, it doubled the connect
+  surface, and its only genuine audience was self-hosted Supabase. Do not
+  reintroduce one as a convenience.
 - **The Supabase management token is discarded.** It can read API keys for every
   project in the user's organisation, so it lives only in a 10-minute encrypted
   cookie and is dropped once one project's key is fetched
@@ -647,7 +681,49 @@ undo by accident and expensive to undo in public:
   the exchange response is deliberately ignored.
 
 **Secrets at rest** — every credential we *do* keep is AES-256-GCM encrypted by
-`lib/crypto.ts` before it touches `integrations.access_token`. Stripe accepts
+`lib/crypto.ts` before it touches `integrations.access_token`. `decrypt()` takes
+a `context` (the user id) and logs one line per call: reading a customer's
+credential is the most sensitive operation here and used to leave no trace, so a
+bulk read looked exactly like a normal night's generation.
+
+**The Supabase project key is the largest asset this app holds**, and it is held
+knowingly, not by oversight. Counting rows a founder's own RLS hides requires a
+credential that bypasses RLS, and Supabase offers no read-only variant of that.
+The alternatives were each tried and rejected: a publishable key returns `0` on
+any RLS-protected table, so the product simply does not work; installing a
+counting function via the Management API would need a *write* scope on the OAuth
+app; and storing the refresh token to re-mint keys trades a per-project
+credential for org-wide standing access. **One-click OAuth, read-only scope, and
+not holding a powerful key: pick two.** If you revisit this, revisit that
+trilemma rather than assuming a fourth option exists.
+
+Note that "the OAuth app is read-only" does not make the outcome read-only:
+reading is exactly how the `service_role` key is obtained
+(`GET /v1/projects/{ref}/api-keys?reveal=true`). Read-only bounds what we can
+change in a founder's account, not what we can learn from it.
+
+**`Secure` on cookies comes from `NODE_ENV`, never from a URL** (`lib/cookies.ts`).
+It previously read `NEXT_PUBLIC_APP_URL.startsWith("https")`, and that variable
+was `http://…` in production for a period — silently dropping `Secure` from the
+OAuth state cookies and from the management-token cookie. A security property
+must not be one typo in an environment variable away from off.
+
+**Key rotation is zero-downtime, and only if done in order.** `decrypt()` accepts
+`ENCRYPTION_KEY` and, when set, `ENCRYPTION_KEY_OLD`, so production reads rows
+under either while a rewrite is in progress. Without that second key there is an
+unavoidable gap: the script re-encrypts rows in the database, but the running
+deployment holds the previous key until a new build is live, and every read
+between the two throws. **The full step-by-step runbook lives in the header of
+`scripts/rotate-encryption-key.mjs`** — follow it there rather than improvising;
+the order is what makes it safe, and getting it wrong makes every stored
+credential unreadable. Unset `ENCRYPTION_KEY_OLD` once the rewrite reports
+`failed 0`, or a compromised environment yields two live keys instead of one.
+
+**`npm run check:scoping`** fails the build if a service-role query lacks
+`.eq("user_id", …)`. RLS cannot catch that omission — bypassing RLS is the point
+of the role — so this is the only mechanical guard on the invariant below.
+Exceptions live in an `ALLOWED` list in the script and each needs a reason;
+there is currently one, the cron's deliberate walk over every user. Stripe accepts
 restricted keys only (`rk_`); `scripts/audit-stripe-keys.mjs` reports rows
 holding an `sk_` from before that was enforced.
 

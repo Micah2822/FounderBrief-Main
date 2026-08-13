@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { encrypt } from "@/lib/crypto";
 import { exchangeCode, MAX_COOKIE_BYTES, TOKEN_COOKIE } from "@/lib/supabase-oauth";
+import { SECURE_COOKIES } from "@/lib/cookies";
 
 // Completes the Management API handshake. The token is put in an encrypted,
 // httpOnly, 10-minute cookie and never written to the database — see the note
@@ -58,7 +59,7 @@ export async function GET(request: Request) {
   const res = NextResponse.redirect(`${origin}/onboarding?step=supabase-project`);
   res.cookies.set(TOKEN_COOKIE, sealed, {
     httpOnly: true,
-    secure: appUrl.startsWith("https"),
+    secure: SECURE_COOKIES,
     maxAge: 600,
     path: "/",
     sameSite: "lax",
