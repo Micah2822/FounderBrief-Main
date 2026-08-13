@@ -8,6 +8,11 @@ export type GitHubDayData = {
   prs_merged: number;
   merged_titles: string[];
   commits: number;
+  // Subject lines of the day's commits — what was shipped, not just how much.
+  // Third-party-writable, so treated exactly like PR titles: single line,
+  // truncated, capped in number, named as untrusted in the system prompt, and
+  // deliberately excluded from the LLM number allowlist (see allowedNumbers).
+  commit_subjects?: string[];
   deployments: number;
   open_prs: { number: number; title: string; repo: string; age_days: number }[];
   repos: string[];
@@ -69,6 +74,11 @@ export type Facts = {
   };
   founder_goal?: string; // the founder's stated focus, verbatim
   partial?: boolean; // covers midnight → now, not a finished day
+  // Sources that ARE connected but whose collection threw. Absence of
+  // `facts.github` alone cannot distinguish "never connected" from "connected
+  // and broken", and telling a founder their working integration isn't
+  // connected sends them to fix the wrong thing.
+  failed?: ("github" | "supabase" | "plausible" | "stripe")[];
   gaps: string[]; // honest holes: "Stripe not connected", "No deploys in 3 days"
 };
 
@@ -88,6 +98,17 @@ export type Brief = {
   priorities: string[];
   gaps: string[];
   generated_with: "ai" | "deterministic";
+  // Whether anything actually happened. Computed from the facts, before they
+  // become display strings — the route used to re-parse the rendered ledger
+  // with a regex and a list of rows to ignore, which meant stringifying
+  // numbers and then reading them back to answer a question the pipeline
+  // already knew. Optional so briefs stored before it existed still work.
+  activity?: boolean;
+  // Connected sources whose collection failed, so the UI can offer a real
+  // "Reconnect GitHub →" link. Structured rather than inferred from the gap
+  // sentence: matching prose with `.includes("is connected")` meant rewording
+  // a gap could silently remove the only way to fix it.
+  reconnect?: ("github" | "supabase" | "plausible" | "stripe")[];
   // True when the brief covers a day still in progress (midnight → now) rather
   // than a closed one. Optional so briefs stored before this existed still
   // deserialize. Its comparisons are measured against the same hours of the

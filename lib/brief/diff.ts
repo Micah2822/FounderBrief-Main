@@ -114,14 +114,36 @@ export function findGaps(facts: Facts): string[] {
       gaps.push("No new signups yesterday or the day before.");
     }
   }
-  if (!facts.product && !facts.traffic) {
+  // A source is missing from `facts` for two very different reasons, and
+  // saying the wrong one sends the founder to fix the wrong thing. A stale
+  // GitHub installation_id (after an uninstall/reinstall) made every token
+  // mint 404 — and the brief announced "GitHub isn't connected" about an
+  // integration that was plainly connected, with no hint that reconnecting
+  // was the fix.
+  const broke = (source: NonNullable<Facts["failed"]>[number]) =>
+    facts.failed?.includes(source) ?? false;
+
+  if (broke("supabase")) {
+    gaps.push("Supabase is connected but couldn't be read — reconnect it to fix this.");
+  } else if (!facts.product && !facts.traffic) {
     gaps.push("No user data is connected — signups and traffic aren't being tracked.");
   } else if (!facts.product) {
     gaps.push("Supabase isn't connected — signups aren't being tracked.");
-  } else if (!facts.traffic) {
+  }
+
+  if (broke("plausible")) {
+    gaps.push("Analytics is connected but couldn't be read — reconnect it to fix this.");
+  } else if (!facts.traffic && facts.product) {
     gaps.push("Analytics isn't connected — website traffic isn't being tracked.");
   }
-  if (!facts.github) {
+
+  if (broke("stripe")) {
+    gaps.push("Stripe is connected but couldn't be read — reconnect it to fix this.");
+  }
+
+  if (broke("github")) {
+    gaps.push("GitHub is connected but couldn't be read — reconnect it to fix this.");
+  } else if (!facts.github) {
     gaps.push("GitHub isn't connected — shipping activity isn't being tracked.");
   }
   return gaps;
@@ -188,10 +210,25 @@ export function baselineInsight(facts: Facts): string {
   }
 
   if (g) {
+    // "yesterday" is wrong on a partial brief, which covers today so far.
+    const when = facts.partial ? "so far today" : "yesterday";
     if (g.days_since_last_ship !== null && g.days_since_last_ship >= 3) {
       parts.push(`No code has shipped in ${g.days_since_last_ship} days.`);
     } else if (g.prs_merged > 0) {
-      parts.push(`${g.prs_merged} PR${g.prs_merged === 1 ? "" : "s"} merged yesterday.`);
+      parts.push(`${g.prs_merged} PR${g.prs_merged === 1 ? "" : "s"} merged ${when}.`);
+    } else if (g.commits > 0 || g.deployments > 0) {
+      // Without this branch a founder who pushes straight to main contributes
+      // nothing to the insight at all — `prs_merged` is permanently 0 for them
+      // and a same-day push means no drought — so the whole thing fell through
+      // to "a quiet day, nothing shipped" printed directly above a ledger
+      // showing five commits. The ledger and the prose disagreeing is worse
+      // than either being sparse.
+      const bits: string[] = [];
+      if (g.commits > 0) bits.push(`${g.commits} commit${g.commits === 1 ? "" : "s"}`);
+      if (g.deployments > 0) {
+        bits.push(`${g.deployments} deployment${g.deployments === 1 ? "" : "s"}`);
+      }
+      parts.push(`You shipped ${bits.join(" and ")} ${when}.`);
     }
   }
 
@@ -330,6 +367,18 @@ export function baselinePriorities(facts: Facts): string[] {
     }
   }
 
+  // Shipping happened, and nothing above it fired. Scored just over the floor
+  // (25) so any real signal outranks it, but it still beats the generic
+  // fallback — a founder who pushed five commits should not be told to "pick
+  // one thing", which reads as though the brief didn't notice.
+  if (g && g.commits > 0 && !g.open_prs.length) {
+    add(
+      `Tell one user what you shipped — ${g.commits} commit${g.commits === 1 ? "" : "s"} went out.`,
+      35,
+      "shipping"
+    );
+  }
+
   // Scored below the floor on purpose: it survives only when it is the sole
   // candidate, and then it stands alone rather than padding a real list.
   add("Pick the one thing that would make today a win, and start there.", 5, "none");
@@ -362,13 +411,25 @@ export function money(amount: number, currency: string): string {
 /** All numbers that legitimately exist in the facts — the LLM allowlist. */
 export function allowedNumbers(facts: Facts): Set<string> {
   const set = new Set<string>();
+  // Attacker-writable text whose digits must NOT become quotable. The walker
+  // adds any number it finds in a string to the allowlist, so a commit message
+  // reading "now at 10000 users" would license the model to print 10000 as
+  // though it were collected data — turning a prompt-injection attempt into a
+  // fabricated figure that passes validation. Titles predate this and stay as
+  // they are; commit subjects are new and arrive in far greater volume.
+  const UNTRUSTED_KEYS = new Set(["commit_subjects"]);
+
   const walk = (v: any) => {
     if (typeof v === "number" && Number.isFinite(v)) {
       set.add(String(Math.abs(Math.round(v))));
       set.add(String(Math.abs(v)));
     } else if (Array.isArray(v)) v.forEach(walk);
-    else if (v && typeof v === "object") Object.values(v).forEach(walk);
-    else if (typeof v === "string") {
+    else if (v && typeof v === "object") {
+      for (const [k, value] of Object.entries(v)) {
+        if (UNTRUSTED_KEYS.has(k)) continue;
+        walk(value);
+      }
+    } else if (typeof v === "string") {
       // numbers embedded in PR titles etc. are quotable
       (v.match(/\d+/g) ?? []).forEach((n) => set.add(String(parseInt(n, 10))));
     }

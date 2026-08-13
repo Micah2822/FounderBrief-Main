@@ -12,29 +12,47 @@ import { useRouter } from "next/navigation";
  * remember is today. This makes that an explicit choice rather than changing
  * what the daily brief means.
  */
-export function TodayBrief() {
+export function TodayBrief({ partial = false }: { partial?: boolean }) {
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
   async function generate() {
     setBusy(true);
+    setError(null);
     const res = await fetch("/api/brief/generate?today=1", { method: "POST" });
     setBusy(false);
 
-    const date = res.ok ? (await res.json())?.brief?.brief_date : null;
-    if (date) router.push(`/?date=${date}`);
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      // Previously this branch did nothing at all, so a 429 from the shared
+      // 30s throttle — which firing Refresh first makes near-certain — looked
+      // exactly like a dead button.
+      setError(body?.error ?? "Couldn't read today.");
+      return;
+    }
+    if (body?.brief?.brief_date) router.push(`/?date=${body.brief.brief_date}`);
     router.refresh();
   }
 
   return (
-    <button
-      onClick={generate}
-      disabled={busy}
-      className="font-mono text-[12px] text-muted hover:text-ink transition-colors disabled:opacity-50"
-    >
-      {/* The arrow is the same affordance the footer links use — it reads as
-          something you press rather than more masthead text. */}
-      {busy ? "Reading today…" : "Today so far →"}
-    </button>
+    <span className="inline-flex items-baseline gap-2">
+      <button
+        onClick={generate}
+        disabled={busy}
+        className="font-mono text-[12px] text-muted hover:text-ink transition-colors disabled:opacity-50"
+      >
+        {/* The arrow belongs to the masthead variant, where it has to read as
+            something you press rather than more dateline text. The footer
+            variant sits among plain-text actions, where an arrow would read as
+            navigation instead. */}
+        {busy ? "Reading today…" : partial ? "Refresh today" : "Today so far →"}
+      </button>
+      {error && (
+        <span className="font-mono text-[11px] text-oxide normal-case tracking-normal">
+          {error}
+        </span>
+      )}
+    </span>
   );
 }

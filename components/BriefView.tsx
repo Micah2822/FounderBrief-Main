@@ -4,6 +4,13 @@ import { formatBriefDate } from "@/lib/dates";
 import { Wordmark } from "@/components/Wordmark";
 import { TodayBrief } from "@/components/TodayBrief";
 
+const PROVIDER_LABEL: Record<string, string> = {
+  github: "GitHub",
+  supabase: "Supabase",
+  plausible: "Analytics",
+  stripe: "Stripe",
+};
+
 export function BriefView({
   brief,
   greeting,
@@ -32,14 +39,11 @@ export function BriefView({
               {brief.partial ? "Today so far" : "Covering"}{" "}
               {formatBriefDate(brief.brief_date)}
             </span>
-            {/* Sits against the date because that is where the ambiguity lives:
-                switching what you are looking at, not an action among actions
-                in the footer. Hidden on a specimen, which has no live data
-                behind it, and while already viewing today.
-
-                The middot matches the masthead's own separators, so the
-                control reads as a distinct item rather than more of the date
-                string running on. */}
+            {/* Switching to today sits against the date, because that is where
+                the ambiguity about which day you are reading lives. Only on a
+                finished brief: once you are already on today there is nothing
+                to switch to, and re-reading it belongs with the other actions
+                in the footer. */}
             {!sample && !brief.partial && (
               <>
                 <span aria-hidden>·</span>
@@ -127,16 +131,35 @@ export function BriefView({
               {g}
             </p>
           ))}
-          {/* A missing connector belongs here, as a quiet offer next to the
-              other honest gaps — never as a priority. "Connect another tool"
-              is our interest, not the founder's work for the day. */}
-          {brief.gaps.some((g) => g.includes("isn't connected") || g.includes("is connected")) && (
-            <Link
-              href="/onboarding"
-              className="inline-block mt-3 font-mono text-[12px] text-muted hover:text-ink transition-colors"
-            >
-              Connect a tool →
-            </Link>
+          {/* A broken integration gets a named link, because "GitHub is
+              connected but couldn't be read" is useless without somewhere to
+              go — a stale installation_id produced exactly that dead end.
+              Driven by `reconnect`, not by matching the sentence: prose is not
+              an API, and rewording a gap should not remove the fix for it. */}
+          {brief.reconnect?.length ? (
+            <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+              {brief.reconnect.map((provider) => (
+                <Link
+                  key={provider}
+                  href="/onboarding"
+                  className="font-mono text-[12px] text-ink underline hover:no-underline"
+                >
+                  Reconnect {PROVIDER_LABEL[provider] ?? provider} →
+                </Link>
+              ))}
+            </p>
+          ) : (
+            /* Nothing is broken, something is simply absent — a quiet offer
+               next to the other honest gaps, never a priority. "Connect
+               another tool" is our interest, not the founder's work today. */
+            brief.gaps.some((g) => g.includes("isn't connected")) && (
+              <Link
+                href="/onboarding"
+                className="inline-block mt-3 font-mono text-[12px] text-muted hover:text-ink transition-colors"
+              >
+                Connect a tool →
+              </Link>
+            )
           )}
         </footer>
       )}

@@ -6,16 +6,19 @@ import type { Brief } from "@/lib/types";
 
 export const maxDuration = 60;
 
-// Standing state, not activity: an open PR count is the same number whether or
-// not the founder did anything that day, so it must not make a quiet day look
-// busy and suppress the fallback below.
-const STANDING_ROWS = new Set(["Open pull requests"]);
-
-/** No row carries a non-zero figure — the day recorded nothing at all. */
+/**
+ * Nothing happened on the day this brief covers.
+ *
+ * `activity` is computed in the pipeline from the facts themselves. Briefs
+ * stored before that field existed fall back to reading the rendered ledger,
+ * which is why the parsing is still here — it is legacy support, not the
+ * primary path, and it can go once no such briefs are being re-read.
+ */
 function isEmptyLedger(brief: Brief): boolean {
-  const activity = brief.yesterday.filter((row) => !STANDING_ROWS.has(row.label));
-  if (!activity.length) return true;
-  return activity.every((row) => {
+  if (typeof brief.activity === "boolean") return !brief.activity;
+  const rows = brief.yesterday.filter((r) => r.label !== "Open pull requests");
+  if (!rows.length) return true;
+  return rows.every((row) => {
     const n = parseFloat(row.value.replace(/[^0-9.-]/g, ""));
     return !Number.isFinite(n) || n === 0;
   });
@@ -38,12 +41,17 @@ export async function POST(request: Request) {
     .select("last_generate_at")
     .eq("user_id", user.id)
     .maybeSingle();
-  if (
-    throttle?.last_generate_at &&
-    Date.now() - new Date(throttle.last_generate_at).getTime() < 30000
-  ) {
+  // Refresh and "Today so far" sit next to each other and share this window,
+  // so using both in succession hits it every time. Say how many seconds are
+  // left rather than "in a moment" — the button looked broken because the
+  // caller showed nothing and the message was vague even when it did.
+  const sinceLast = throttle?.last_generate_at
+    ? Date.now() - new Date(throttle.last_generate_at).getTime()
+    : Infinity;
+  if (sinceLast < 30000) {
+    const wait = Math.ceil((30000 - sinceLast) / 1000);
     return NextResponse.json(
-      { error: "Your brief was just generated — try again in a moment." },
+      { error: `Just generated — try again in ${wait}s.` },
       { status: 429 }
     );
   }

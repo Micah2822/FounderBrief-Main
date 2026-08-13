@@ -325,6 +325,23 @@ The floor sits just under the weakest real signal (fresh PR, 30) so the generic
 fallback can never ride along beside a concrete instruction. On a quiet day the
 brief says one true thing and stops.
 
+### The insight must describe the same activity the numbers show
+
+`baselineInsight()` originally spoke about GitHub only through merged PRs and a
+three-day drought. For a founder who pushes straight to main, `prs_merged` is
+permanently 0 and a same-day push means no drought — so GitHub contributed
+nothing, and the whole function fell through to its default: *"A quiet day —
+nothing shipped"*, printed directly above a ledger reading five commits and four
+deployments. **A row of numbers and a sentence that contradict each other are
+worse than either being sparse**, because the reader cannot tell which one is
+lying.
+
+The same hole existed in `baselinePriorities()`, which produced *"Pick the one
+thing that would make today a win"* on a day with five commits — a brief that
+visibly had not noticed. Both now have a commits-and-deployments branch. When
+adding a metric to the ledger, add it here too, or it will be a number nothing
+can talk about.
+
 ### Connecting a tool is never a priority
 
 There is no candidate for it in the scorer, and the LLM is forbidden from
@@ -462,10 +479,19 @@ never a bare date. A masthead reads as an *issue* date; this one is the period
 the brief covers, and unlabelled it was read as the page being stale. The email
 masthead says `Covering …` for the same reason.
 
-Beside it, `TodayBrief` (`?today=1`) switches to the day in progress. It sits
-against the date rather than in the footer because it changes *what you are
-looking at*, not what you are doing — separated by the same middot the masthead
-uses elsewhere, and hidden on the specimen and when already viewing today.
+`TodayBrief` (`?today=1`) appears in **two places, by state**:
+
+- **On a finished brief** it sits in the masthead beside the date, labelled
+  "Today so far →". That is where the ambiguity about which day you are reading
+  lives, so that is where the switch belongs.
+- **On a partial brief** the masthead switch is gone — you are already on today
+  — and it moves to the **footer beside `Refresh`**, labelled "Refresh today".
+  There it is re-reading the day you are on, which is an action like the others
+  rather than a change of view.
+
+Hiding it entirely on partial briefs was wrong: today keeps moving, and
+`Refresh` regenerates *yesterday*, so there was no way to re-read today at all
+after committing again.
 
 Two other web-only controls, both absent from the email because it can't hold
 state or use relative links:
@@ -586,6 +612,22 @@ Notable per-source behaviour:
   none merged in 30 days). The ledger then hides both PR rows, and the LLM is
   told not to suggest opening or reviewing one. Two permanent zeroes at the top
   of the ledger are not information — they crowd out the rows that move.
+
+  **`commit_subjects` is what makes an insight specific.** The messages arrive
+  in the `/commits` response already fetched for the count, so collecting them
+  is free — and without them the model receives `commits: 5` with no idea what
+  was shipped, which is the ceiling on how good any insight can be. Four
+  defences, because a commit message is text an attacker can write: first line
+  only, control characters stripped and whitespace collapsed, truncated to 120
+  chars and capped at 10, and merge commits and near-empty messages dropped
+  (commit hygiene varies; ten "wip" lines are worse than a count).
+
+  The fourth defence is the non-obvious one: **`commit_subjects` is excluded
+  from `allowedNumbers()`.** That walker adds every digit it finds in a string
+  to the LLM's quotable-number allowlist, so a commit reading "now at 10000
+  users" would license the model to print 10000 as a collected figure and pass
+  validation. Injection would have become fabrication. PR titles predate this
+  and are unchanged; commit subjects arrive in far greater volume.
 - **Supabase (founder's)** — counts are `HEAD` + `Prefer: count=exact`. Schema
   discovery reads the PostgREST OpenAPI root.
 

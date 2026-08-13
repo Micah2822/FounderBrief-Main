@@ -7,6 +7,7 @@ import { Landing } from "@/components/Landing";
 import { Chat } from "@/components/Chat";
 import { GenerateButton } from "@/components/GenerateButton";
 import { RefreshBrief } from "@/components/RefreshBrief";
+import { TodayBrief } from "@/components/TodayBrief";
 import { Wordmark } from "@/components/Wordmark";
 import { localHour } from "@/lib/dates";
 import type { Brief } from "@/lib/types";
@@ -114,6 +115,10 @@ export default async function Home({
           )}
         </div>
         <div className="flex items-center gap-4 font-mono text-[12px] text-muted">
+          {/* Only on a partial brief, where the masthead's "Today so far"
+              switch is gone because you are already there — this re-reads it,
+              so it belongs beside Refresh. */}
+          {brief?.partial && <TodayBrief partial />}
           {brief && <RefreshBrief />}
           <Link href="/settings" className="hover:text-ink transition-colors">
             Settings

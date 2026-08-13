@@ -22,8 +22,9 @@ export default function PrivacyPage() {
           <p className="text-muted">
             Your email address (to sign you in and send your brief), and daily
             aggregate activity from the tools you connect: counts of merged
-            pull requests, commits, deployments, open pull request titles, and
-            counts of new rows in the one database table you choose.
+            pull requests, commits, deployments, the subject lines of your
+            commits and open pull request titles, and counts of new rows in the
+            one database table you choose.
           </p>
         </section>
 
@@ -37,8 +38,10 @@ export default function PrivacyPage() {
             &ldquo;no signups today&rdquo;. That timestamp is used to work out a
             number of days and is not stored. No other column is ever read — we
             cannot see your users&apos; names, emails, or any other row data.
-            We do not read your source code; only PR titles and activity
-            counts.
+            We do not read your source code. We do read the subject line of
+            each commit — the one-line description you write, not the change
+            itself — so the brief can say what you shipped rather than only how
+            much.
           </p>
         </section>
 
@@ -94,8 +97,9 @@ export default function PrivacyPage() {
           <p className="text-muted">
             We use Supabase (authentication and storage), Vercel (hosting),
             Resend (email delivery), and OpenAI (to phrase your brief and
-            answer questions). Only aggregate counts and PR titles are sent to
-            OpenAI — never your credentials, never your users&apos; data. We
+            answer questions). Only aggregate counts, commit subject lines and
+            PR titles are sent to OpenAI — never your credentials, never your
+            source code, never your users&apos; data. We
             do not sell data or use it for advertising. Your data is used to
             generate your brief, and for nothing else.
           </p>

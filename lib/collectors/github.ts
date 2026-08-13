@@ -49,6 +49,46 @@ async function listPulls(token: string, repo: string, state: "closed" | "open") 
   }
 }
 
+const MAX_SUBJECTS = 10;
+const MAX_SUBJECT_CHARS = 120;
+
+/**
+ * Commit subject lines, cleaned for use as LLM context.
+ *
+ * The messages are already in the `/commits` response we fetch for the count,
+ * so this costs nothing extra — and without it the model receives `commits: 5`
+ * and no idea what was shipped, which is why the brief could only ever say
+ * "you shipped 5 commits".
+ *
+ * Everything here is defensive, because a commit message is text an attacker
+ * can write:
+ *  - first line only, so a crafted multi-line body cannot smuggle in an
+ *    instruction block that reads like a new prompt;
+ *  - whitespace collapsed and control characters dropped;
+ *  - truncated, and capped in number, so no single message can dominate;
+ *  - merge commits and near-empty messages dropped, because "Merge branch
+ *    main" and "wip" are noise that crowds out the real ones. Commit hygiene
+ *    varies, and a brief built from ten "fix" messages is worse than one built
+ *    from a count.
+ */
+function commitSubjects(commits: any[]): string[] {
+  const out: string[] = [];
+  for (const c of commits) {
+    const raw = String(c?.commit?.message ?? "");
+    const subject = raw
+      .split("\n")[0]
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001f\u007f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!subject || subject.length < 4) continue;
+    if (/^merge (pull request|branch|remote-tracking)/i.test(subject)) continue;
+    const clipped = subject.slice(0, MAX_SUBJECT_CHARS);
+    if (!out.includes(clipped)) out.push(clipped);
+  }
+  return out;
+}
+
 /** Collect facts for one local day across the selected repos. */
 export async function collectGitHub(
   token: string,
@@ -76,6 +116,7 @@ export async function collectGitHub(
   let commits = 0;
   let deployments = 0;
   const unreadable: string[] = [];
+  const subjects: string[] = [];
   for (const repo of repos) {
     try {
       const c = await gh(token, `/repos/${repo}/commits`, {
@@ -84,6 +125,7 @@ export async function collectGitHub(
         per_page: "100",
       });
       commits += Array.isArray(c) ? c.length : 0;
+      if (Array.isArray(c)) subjects.push(...commitSubjects(c));
     } catch (e) {
       // A 409 is a genuinely empty repository and really is zero commits.
       // Anything else — a 403 from a missing Contents permission, a 404 from a
@@ -131,6 +173,7 @@ export async function collectGitHub(
       age_days: Math.floor((now - new Date(p.created_at).getTime()) / 86400000),
     })),
     repos,
+    ...(subjects.length ? { commit_subjects: subjects.slice(0, MAX_SUBJECTS) } : {}),
     ...(unreadable.length ? { unreadable_repos: unreadable } : {}),
   };
 }
