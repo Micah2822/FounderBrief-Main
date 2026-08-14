@@ -115,6 +115,8 @@ app/
     tool-request/             Demand capture for unsupported tools
     integrations/             github/{authorize,callback,repos},
                               supabase/{route,authorize,callback}, plausible, stripe
+    billing/                  checkout, return (grants the tier), portal, webhook
+    account/                  Permanent deletion; cancels Stripe before the cascade
   auth/callback/              Legacy OAuth-code safety net; not the primary sign-in
 lib/
   brief/generate.ts           The pipeline. Orchestrates everything below
@@ -1049,6 +1051,10 @@ Update this doc in the same change as the code when you:
 - change the **pipeline order**, the partial-brief rule, **which day a brief
   covers**, or LLM validation → the pipeline section and Invariants
 - change **auth, RLS, grants, encryption, or rate limits** → Auth and security
+- change **how the paid tier is granted or revoked** → the three layers under
+  Known issues, and check `PAID_STATUSES` in `lib/stripe.ts` still matches the
+  copy in `scripts/audit-billing.mjs`; if they drift, the webhook and the script
+  fix the same rows to different values and fight each other
 - change the **cron schedule, the workflow, or the production domain** →
   Scheduling
 - add a **table that stores user data** → give it `on delete cascade` on

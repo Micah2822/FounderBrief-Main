@@ -14,16 +14,6 @@ export const FREE_CONNECTOR_LIMIT = 2;
 
 export type Tier = "free" | "founder";
 
-export async function getTier(userId: string): Promise<Tier> {
-  const db = createAdminClient();
-  const { data } = await db
-    .from("user_settings")
-    .select("tier")
-    .eq("user_id", userId)
-    .maybeSingle();
-  return data?.tier === "founder" ? "founder" : "free";
-}
-
 /**
  * Would connecting `provider` add a tool this user does not already have?
  *

@@ -15,8 +15,20 @@ import Stripe from "stripe";
  *
  * No `apiVersion` is pinned: the SDK defaults to the version it was built
  * against, which moves only when the dependency is deliberately upgraded.
+ *
+ * **Constructed on first use, not at module scope.** Stripe's constructor
+ * throws when the key is missing, and `app/api/account/route.ts` imports this
+ * module — so building the client at import time meant one unset environment
+ * variable took down *account deletion*, a route that has nothing to do with
+ * billing. Deferring it means a missing key fails only when something actually
+ * tries to talk to Stripe, and a user with no `stripe_customer_id` never does.
  */
-export const stripe = new Stripe(process.env.STRIPE_BILLING_SECRET_KEY!);
+let client: Stripe | null = null;
+
+export function stripe(): Stripe {
+  if (!client) client = new Stripe(process.env.STRIPE_BILLING_SECRET_KEY!);
+  return client;
+}
 
 /**
  * Subscription statuses that count as paid.

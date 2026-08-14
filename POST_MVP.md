@@ -199,7 +199,7 @@ Goal: revenue without killing the free habit loop.
 
 | Item | Notes | Effort |
 |---|---|---|
-| **Billing (Stripe Checkout + customer portal)** | Suggested split — Free: 1 repo + 1 data source, weekly brief. Pro (~$15–19/mo): daily brief, all integrations, chat, goal tracking. Price the *habit*, not the data | M |
+| ~~Billing (Stripe Checkout + customer portal)~~ | **Shipped 2026-08-14.** Simpler split than scoped here: the *only* gate is connector count — Free 2, Founder $19/mo unlimited. Daily brief, chat and goal tracking stay free on both, because gating the habit would kill the habit. Team/Growth is a `mailto:`, not a plan. See ARCHITECTURE › The paywall: six walls | — |
 | **Team briefs** | Same startup, brief goes to co-founders too; one shared integration set. First natural expansion revenue | M |
 | **Investor update draft** | "Generate my monthly investor update" from 30 days of collected facts — founders dread writing these; the data is already in `daily_metrics`. Possibly the single most viral feature | M |
 | **Public changelog page** | Auto-generated "what we shipped this week" page founders can share — every share is marketing | M |

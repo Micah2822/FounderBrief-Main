@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
-import { getTier } from "@/lib/billing";
 
 /**
  * Starts a Checkout Session for the Founder plan.
@@ -28,24 +27,24 @@ export async function POST() {
     return NextResponse.json({ error: "Billing isn't configured." }, { status: 500 });
   }
 
-  // Already paying: send them to manage the subscription rather than sell them
-  // a second one. Stripe would happily create it.
-  if ((await getTier(user.id)) === "founder") {
-    return NextResponse.json({ error: "already_subscribed" }, { status: 409 });
-  }
-
   const admin = createAdminClient();
   const { data: settings } = await admin
     .from("user_settings")
-    .select("stripe_customer_id")
+    .select("tier, stripe_customer_id")
     .eq("user_id", user.id)
     .maybeSingle();
+
+  // Already paying: send them to manage the subscription rather than sell a
+  // second one, which Stripe would happily create and charge for.
+  if (settings?.tier === "founder") {
+    return NextResponse.json({ error: "already_subscribed" }, { status: 409 });
+  }
 
   let customerId = settings?.stripe_customer_id ?? null;
 
   if (!customerId) {
     try {
-      const customer = await stripe.customers.create({
+      const customer = await stripe().customers.create({
         email: user.email ?? undefined,
         // For finding the account from the Stripe dashboard. The app never
         // reads this back — the lookup goes the other way, by customer id.
@@ -70,7 +69,7 @@ export async function POST() {
   }
 
   try {
-    const session = await stripe.checkout.sessions.create({
+    const session = await stripe().checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
       line_items: [{ price, quantity: 1 }],

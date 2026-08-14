@@ -49,7 +49,7 @@ export async function DELETE() {
   // nobody sees and which keeps taking their money.
   if (settings?.stripe_customer_id) {
     try {
-      await stripe.customers.del(settings.stripe_customer_id);
+      await stripe().customers.del(settings.stripe_customer_id);
     } catch (e: any) {
       // Already gone is the success case, not something to wake anyone for.
       if (e?.code !== "resource_missing") {

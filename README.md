@@ -393,11 +393,15 @@ has no billing UI of its own.
 appears on your customers' card statements; if it is unset or unrecognisable you
 get chargebacks from people who don't recognise the charge.
 
-**5.5 Webhook.** Stripe tells the app about payments by POSTing to
-`/api/billing/webhook`. Nothing activates a subscription without it: checkout
-completing in the browser is not what grants access — the webhook is.
+**5.5 Webhook.** Stripe posts subscription events to `/api/billing/webhook`.
 
-That endpoint is public (Stripe sends no session cookie), so **the signature is
+This does **not** carry the upgrade. When someone pays, Checkout returns them to
+`/api/billing/return`, which asks Stripe about the session directly and grants
+the tier there and then — so a webhook that never arrives cannot leave a paying
+customer on the free plan. The webhook carries what happens when nobody is
+present: a cancellation at period end, a renewal failing, a card expiring.
+
+The endpoint is public (Stripe sends no session cookie), so **the signature is
 the only thing standing between a stranger and a free `founder` tier**. It is
 verified against `STRIPE_BILLING_WEBHOOK_SECRET` on every request, and the
 secret is different in development and production.
@@ -412,32 +416,71 @@ stripe listen --forward-to localhost:3000/api/billing/webhook
 
 It prints a `whsec_…` on start. **That is the value for `.env.local`** — it is
 not the same as the one the dashboard shows for a hosted endpoint, and using the
-dashboard's value locally fails every signature check. Leave `stripe listen`
-running while you test; it re-prints the same secret each time.
+dashboard's value locally fails every signature check.
 
-*In production*, Developers → **Webhooks** → **Add endpoint**:
+The relay only forwards while it is running and does not queue: an event sent
+while it is stopped is simply lost, and Stripe never saw a failure to retry. So
+run it when you want to exercise cancellation locally. You do **not** need it to
+test upgrading — that path goes through `/api/billing/return` and involves no
+webhook at all. (In production this whole concern disappears: Stripe posts
+directly to your domain and retries failures for days.)
+
+*Anywhere the app is reachable over HTTPS* — a deployment, whether it is still
+on sandbox keys or on live ones — Stripe delivers directly and no CLI is
+involved. Developers → **Webhooks** → **Add endpoint**:
 
 - URL: `https://YOURAPP/api/billing/webhook`
 - Events: `checkout.session.completed`, `customer.subscription.created`,
   `customer.subscription.updated`, `customer.subscription.deleted`
 
 Copy that endpoint's signing secret into Vercel as
-`STRIPE_BILLING_WEBHOOK_SECRET`. Like everything else in this section, the
-endpoint is per-environment — a sandbox endpoint never fires for live payments.
+`STRIPE_BILLING_WEBHOOK_SECRET`. **Sandbox and live have separate Webhooks
+pages**, so a deployment on sandbox keys needs an endpoint created in sandbox,
+and going live later means creating it again in live and swapping the secret.
 
-**5.6 Environment variables.** Three, all from the steps above:
+**5.6 Environment variables — three environments, not two.**
 
-| Var | Where it comes from | Dev | Production |
+Most guides describe "dev" and "production" and skip the one you will actually
+spend the most time in: **deployed, but still on sandbox keys**, so you can test
+the real hosted flow without taking real money.
+
+| | Local | Deployed test | Live |
 |---|---|---|---|
-| `STRIPE_BILLING_SECRET_KEY` | 5.2 | `rk_test_…` | `rk_live_…` |
-| `STRIPE_PRICE_FOUNDER` | 5.1 | sandbox `price_…` | live `price_…` |
-| `STRIPE_BILLING_WEBHOOK_SECRET` | 5.5 | from `stripe listen` | from the hosted endpoint |
+| App runs at | `localhost:3000` | your Vercel URL | your Vercel URL |
+| Stripe mode | sandbox | **sandbox** | live |
+| Real money | no | **no** | **yes** |
+| `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | the deployed URL | the deployed URL |
+| `STRIPE_BILLING_SECRET_KEY` | `rk_test_…` | `rk_test_…` *(same)* | `rk_live_…` |
+| `STRIPE_PRICE_FOUNDER` | sandbox `price_…` | sandbox `price_…` *(same)* | live `price_…` |
+| `STRIPE_BILLING_WEBHOOK_SECRET` | from `stripe listen` | **from the sandbox hosted endpoint** | from the live hosted endpoint |
+| Set them in | `.env.local` | Vercel | Vercel |
 
-Sandbox values go in `.env.local` and stay there. Live values go in Vercel's
-Production environment and nowhere else. **Every one of the six differs between
-the two columns** — the commonest way to break this is to carry one across.
+Reading the middle column: **the key and the price carry over from local
+unchanged — only the webhook secret changes**, because a hosted endpoint is a
+different endpoint from the CLI relay and signs with its own secret. That single
+swap is the whole difference between local and deployed testing, and getting it
+wrong is the commonest failure: every webhook returns 400 while everything looks
+correctly configured.
 
-**5.7 Migration.** Apply `supabase/migrations/0004_billing.sql`, which adds
+`NEXT_PUBLIC_APP_URL` also becomes load-bearing for payments here. `success_url`
+is built from it, so if a deployment still carries `localhost:3000` a paying
+customer is redirected to their own machine and never reaches
+`/api/billing/return`.
+
+> **Test on Vercel's Production environment, not a preview deployment.** Preview
+> URLs change on every push, which breaks both the webhook endpoint URL and
+> `NEXT_PUBLIC_APP_URL` — you would be re-pointing Stripe after every deploy.
+> Deploy to the real domain on sandbox keys, test there, then swap the three
+> values to live when you are ready. Sandbox keys cannot charge anyone, so a
+> production deployment running on them is safe.
+
+**5.7 Checking it afterwards.** `node scripts/audit-billing.mjs` compares Stripe
+to the database and reports anyone paying but on free, anyone on founder without
+paying, and any subscription still billing a deleted account. `--apply` fixes
+the tier mismatches; cancelling a subscription stays a deliberate act in the
+dashboard. Run it when a customer says "I paid and it still says Free".
+
+**5.8 Migration.** Apply `supabase/migrations/0004_billing.sql`, which adds
 `tier` and `stripe_customer_id` to `user_settings`. Migrations are applied by
 hand (see ARCHITECTURE › Data model). Everyone existing defaults to `free`.
 
@@ -471,19 +514,30 @@ npm run dev
    returns `500`, the GitHub Action goes red, and GitHub emails you about the
    failed workflow. Silence or redirect *that* one under GitHub → Settings →
    Notifications → Actions.
-3. **Redo section 5 in live mode.** Sandbox and live share nothing: create the
+3. **Deploy on sandbox keys first and test there.** Copy
+   `STRIPE_BILLING_SECRET_KEY` and `STRIPE_PRICE_FOUNDER` from `.env.local`
+   unchanged, set `NEXT_PUBLIC_APP_URL` to the deployed URL, then add a webhook
+   endpoint **in sandbox** pointing at `https://YOURAPP/api/billing/webhook` and
+   put *its* signing secret in `STRIPE_BILLING_WEBHOOK_SECRET` — that one value
+   is the only thing that differs from local (section 5.6). Test the whole flow
+   with `4242 4242 4242 4242`. Sandbox keys cannot charge anyone, so this is
+   safe on the real domain.
+
+4. **Then switch to live mode.** Sandbox and live share nothing: create the
    product and price again, create a new restricted key with the same four
    permissions, **activate the Customer portal again**, and **add the webhook
-   endpoint** pointing at the production URL (section 5.5). That yields three
-   new values — `rk_live_…`, a live `price_…`, and the endpoint's own
-   `whsec_…` — which go in Vercel's Production environment only, with the
-   sandbox values left in `.env.local`. Stripe also needs business and bank
+   endpoint again** in live (section 5.5). That yields three new values —
+   `rk_live_…`, a live `price_…`, and the live endpoint's own `whsec_…` — which
+   replace the sandbox three in Vercel, with the sandbox values left in
+   `.env.local`. Stripe also needs business and bank
    details before it will accept live payments, and that can require
    verification — start it well before you plan to launch.
 
-   The webhook is the step whose absence is silent: checkout succeeds, the
-   customer is charged, and their tier never changes.
-4. Once you know the production domain, replace `YOURAPP` everywhere it is
+   A missing webhook no longer loses an upgrade — `/api/billing/return` grants
+   the tier by asking Stripe when the customer comes back. What it does lose is
+   everything that happens later with nobody present: a cancellation at period
+   end, a renewal failing. Those simply never take effect.
+5. Once you know the production domain, replace `YOURAPP` everywhere it is
    hardcoded outside the repo:
    - Supabase **Site URL** (section 1)
    - Supabase **Redirect URLs** (section 1)
@@ -550,9 +604,16 @@ little of that as possible.
 - **Supabase** — the OAuth flow's management token is used once and discarded,
   so we hold one project's key rather than standing access to an organisation.
   Keeping that token "to make refreshes easier" would undo the whole point.
-- **Stripe** — restricted keys only (`rk_`). Secret keys are rejected at the
-  API boundary; `scripts/audit-stripe-keys.mjs` reports any stored before that
-  was enforced.
+- **Stripe** — restricted keys only (`rk_`), on both sides. Users' connector
+  keys are rejected at the API boundary unless they start `rk_`, and
+  `scripts/audit-stripe-keys.mjs` reports any secret keys stored before that was
+  enforced. Our own billing key is restricted too, scoped to four resources
+  (README section 5.2) — so **no `sk_` exists anywhere in this product**.
+- **Billing webhook** — public by necessity, since Stripe sends no session
+  cookie. Its Stripe signature check is therefore the authorisation boundary and
+  must never be relaxed. Granting the paid tier does not depend on it: that
+  happens in `/api/billing/return`, which verifies the checkout session belongs
+  to the caller before upgrading anyone.
 - **Plausible** — no OAuth exists; its keys are read-only by nature.
 - **There is no manual Supabase path.** OAuth is the only way to connect, so no
   founder is ever asked to paste a key into a form. Do not reintroduce one as a

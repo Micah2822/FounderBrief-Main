@@ -48,7 +48,7 @@ export async function GET(request: Request) {
     .maybeSingle();
 
   try {
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const session = await stripe().checkout.sessions.retrieve(sessionId);
     const customerId =
       typeof session.customer === "string" ? session.customer : session.customer?.id;
 
@@ -76,7 +76,8 @@ export async function GET(request: Request) {
         console.error("billing/return: tier update failed", error);
         return NextResponse.redirect(`${appUrl}/settings?billing=pending`);
       }
-      return NextResponse.redirect(`${appUrl}/settings?upgraded=1`);
+      // No success flag: the page shows the tier, which is the honest feedback.
+      return NextResponse.redirect(`${appUrl}/settings`);
     }
 
     // Paid asynchronously (some payment methods settle later). The webhook is

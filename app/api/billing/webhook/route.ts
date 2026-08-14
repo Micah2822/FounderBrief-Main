@@ -7,10 +7,14 @@ import { stripe, PAID_STATUSES } from "@/lib/stripe";
 export const runtime = "nodejs";
 
 /**
- * Stripe → app. This is what actually grants and revokes the Founder tier.
+ * Stripe → app, for everything that happens when nobody is present: a renewal
+ * failing, a cancellation reaching period end, a card expiring.
  *
- * Checkout completing in the browser grants nothing; the success_url is only a
- * redirect and a user can visit it directly. Access changes here or not at all.
+ * It is deliberately **not** the only way the paid tier is granted. Webhooks are
+ * pushes and pushes fail, so `/api/billing/return` grants it by asking Stripe
+ * directly the moment the customer comes back from checkout. This route still
+ * handles the upgrade events too — they usually arrive first and it is
+ * idempotent — but nothing depends on them arriving.
  *
  * ── The signature is the authorisation boundary ──────────────────────────────
  * Stripe sends no session cookie, so this path is public in `middleware.ts` and
@@ -40,7 +44,7 @@ export async function POST(request: Request) {
 
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(await request.text(), signature, secret);
+    event = stripe().webhooks.constructEvent(await request.text(), signature, secret);
   } catch (e) {
     // Deliberately terse. An unsigned POST is either a misconfiguration or
     // somebody probing; neither deserves detail in the response.

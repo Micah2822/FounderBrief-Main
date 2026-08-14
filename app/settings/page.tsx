@@ -8,7 +8,11 @@ import { FREE_CONNECTOR_LIMIT } from "@/lib/billing";
 
 export const dynamic = "force-dynamic";
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: { billing?: string };
+}) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -27,6 +31,15 @@ export default async function SettingsPage() {
           ← Back to brief
         </Link>
       </p>
+      {/* Set by /api/billing/return when it could not confirm the payment with
+          Stripe. Without it the founder lands back here still showing Free
+          having just paid, with nothing to explain why. */}
+      {searchParams.billing === "pending" && (
+        <p className="text-[13px] text-muted leading-relaxed border border-line rounded-md px-4 py-3 mt-6">
+          Your payment is going through. This page updates on its own once
+          Stripe confirms it — usually within a minute. Nothing to do.
+        </p>
+      )}
       <SettingsForm
         email={user.email ?? ""}
         timezone={settings?.timezone ?? "UTC"}
