@@ -514,30 +514,33 @@ npm run dev
    returns `500`, the GitHub Action goes red, and GitHub emails you about the
    failed workflow. Silence or redirect *that* one under GitHub → Settings →
    Notifications → Actions.
-3. **Deploy on sandbox keys first and test there.** Copy
-   `STRIPE_BILLING_SECRET_KEY` and `STRIPE_PRICE_FOUNDER` from `.env.local`
-   unchanged, set `NEXT_PUBLIC_APP_URL` to the deployed URL, then add a webhook
-   endpoint **in sandbox** pointing at `https://YOURAPP/api/billing/webhook` and
-   put *its* signing secret in `STRIPE_BILLING_WEBHOOK_SECRET` — that one value
-   is the only thing that differs from local (section 5.6). Test the whole flow
-   with `4242 4242 4242 4242`. Sandbox keys cannot charge anyone, so this is
-   safe on the real domain.
+3. **Run the billing migration** (section 5.8) against the production database.
+   It must land *before* the deploy that reads `tier`, or every page querying it
+   errors on a missing column.
+4. **Deploy on sandbox keys, and test on the real domain.** Section 5.6 has the
+   values; the only Stripe one that differs from `.env.local` is
+   `STRIPE_BILLING_WEBHOOK_SECRET`, which now comes from a webhook endpoint you
+   add **in sandbox** pointing at `https://YOURAPP/api/billing/webhook`
+   (section 5.5). Sandbox keys cannot charge anyone, so this is safe in
+   production. Test with `4242 4242 4242 4242`.
+5. **Go live: swap three values, redo three settings.** Live shares nothing with
+   sandbox, so in live mode repeat sections 5.1 (product and price), 5.2
+   (restricted key), 5.3 (**activate the portal again**) and 5.5 (**add the
+   webhook endpoint again**). Then replace these three in Vercel and redeploy:
 
-4. **Then switch to live mode.** Sandbox and live share nothing: create the
-   product and price again, create a new restricted key with the same four
-   permissions, **activate the Customer portal again**, and **add the webhook
-   endpoint again** in live (section 5.5). That yields three new values —
-   `rk_live_…`, a live `price_…`, and the live endpoint's own `whsec_…` — which
-   replace the sandbox three in Vercel, with the sandbox values left in
-   `.env.local`. Stripe also needs business and bank
-   details before it will accept live payments, and that can require
-   verification — start it well before you plan to launch.
+   | Var | From | To |
+   |---|---|---|
+   | `STRIPE_BILLING_SECRET_KEY` | `rk_test_…` | `rk_live_…` |
+   | `STRIPE_PRICE_FOUNDER` | sandbox `price_…` | live `price_…` |
+   | `STRIPE_BILLING_WEBHOOK_SECRET` | sandbox endpoint | live endpoint |
 
-   A missing webhook no longer loses an upgrade — `/api/billing/return` grants
-   the tier by asking Stripe when the customer comes back. What it does lose is
-   everything that happens later with nobody present: a cancellation at period
-   end, a renewal failing. Those simply never take effect.
-5. Once you know the production domain, replace `YOURAPP` everywhere it is
+   Nothing else changes — no code, no other variable. Leave the sandbox values
+   in `.env.local` so local development keeps working.
+
+   Stripe needs business and bank details before it accepts live payments, and
+   that can require verification, so start it well before you plan to launch.
+   Finish by paying with a real card and refunding yourself.
+6. Once you know the production domain, replace `YOURAPP` everywhere it is
    hardcoded outside the repo:
    - Supabase **Site URL** (section 1)
    - Supabase **Redirect URLs** (section 1)
