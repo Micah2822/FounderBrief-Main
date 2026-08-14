@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { encrypt } from "@/lib/crypto";
 import { verifyStripe } from "@/lib/collectors/stripe";
+import { canAddConnector, CONNECTOR_LIMIT_MESSAGE } from "@/lib/billing";
 
 // Restricted keys only. A secret key (sk_) can create charges and issue
 // refunds; the brief needs nothing but reads, so accepting one would store far
@@ -30,6 +31,13 @@ export async function POST(request: Request) {
     );
   }
   const { key } = parsed.data;
+
+  // This is the paywall for the Stripe *connector* — the founder's own account,
+  // read-only. It has nothing to do with the Stripe account that bills for
+  // Founder Brief itself, which lives under /api/billing.
+  if (!(await canAddConnector(user.id, "stripe"))) {
+    return NextResponse.json({ error: CONNECTOR_LIMIT_MESSAGE, code: "limit" }, { status: 402 });
+  }
 
   try {
     await verifyStripe(key);

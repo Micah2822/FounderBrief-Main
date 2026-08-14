@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { SettingsForm } from "@/components/SettingsForm";
 import { Wordmark } from "@/components/Wordmark";
+import { FREE_CONNECTOR_LIMIT } from "@/lib/billing";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,8 @@ export default async function SettingsPage() {
         sendHour={settings?.send_hour ?? 7}
         emailEnabled={settings?.email_enabled ?? true}
         goal={settings?.goal ?? ""}
+        tier={settings?.tier === "founder" ? "founder" : "free"}
+        connectorLimit={FREE_CONNECTOR_LIMIT}
         integrations={(integrations ?? []).map((i) => ({
           provider: i.provider,
           detail:

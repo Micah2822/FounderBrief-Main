@@ -92,6 +92,9 @@ No test framework, no ESLint config, no state library. The automated checks are
 | `CRON_SECRET` | cron bearer token; **fails closed if unset** |
 | `ALERT_EMAIL` | operator failure alerts; **unset = off**, and it is also the recipient |
 | `ENCRYPTION_KEY_OLD` | set **only during a key rotation**; see the runbook in `scripts/rotate-encryption-key.mjs` |
+| `STRIPE_BILLING_SECRET_KEY` | billing — **your** Stripe account. Restricted (`rk_`), four permissions; never `sk_` |
+| `STRIPE_BILLING_WEBHOOK_SECRET` | signature verification for `/api/billing/webhook`; locally this comes from `stripe listen`, not the dashboard |
+| `STRIPE_PRICE_FOUNDER` | the `price_…` for $19/month; different in sandbox and live |
 
 ---
 
@@ -121,6 +124,8 @@ lib/
   supabase-oauth.ts           Management API OAuth for the FOUNDER's Supabase
   email/send.ts               Brief object → inline-styled HTML email
   supabase/{admin,server,client}.ts   The APP's own Supabase, not a user's
+  billing.ts                  Tier + the connector limit. Server-only
+  stripe.ts                   Billing Stripe client — OUR account, not a user's
   crypto.ts  dates.ts  types.ts  sample.ts
 components/
   BriefView.tsx               The brief, on the web
@@ -129,6 +134,7 @@ components/
 public/robots.txt             Crawlers get the homepage only (see Search visibility)
 scripts/generate-icons.mjs    Regenerates the favicon PNGs from app/icon.svg
 scripts/audit-stripe-keys.mjs Reports stored Stripe keys that are sk_ not rk_
+scripts/audit-billing.mjs     Stripe vs database: tier mismatches and orphans
 scripts/rotate-encryption-key.mjs  Re-encrypts integrations under a new ENCRYPTION_KEY
 scripts/check-tenant-scoping.mjs   Fails if a service-role query lacks .eq("user_id")
 scripts/check-github-app.mjs  Validates GITHUB_APP_* and mints a test token
@@ -149,7 +155,7 @@ only and never queries a table.
 
 | Table | Holds | Written by | Read by |
 |---|---|---|---|
-| `user_settings` | timezone, `send_hour`, `email_enabled`, `goal`, `onboarded_at`, `last_generate_at` | settings API, generate route, cron | cron, pipeline, chat, pages |
+| `user_settings` | timezone, `send_hour`, `email_enabled`, `goal`, `onboarded_at`, `last_generate_at`, `tier`, `stripe_customer_id` | settings API, generate route, cron, billing webhook | cron, pipeline, chat, pages, paywall |
 | `integrations` | provider, **encrypted** `access_token`, `config` jsonb | integration routes | pipeline, onboarding, settings |
 | `daily_metrics` | one row per (user, date, source) | pipeline | **chat only** — see below |
 | `briefs` | the rendered `Brief` object as jsonb, `emailed_at` | pipeline, cron | home page, chat |
@@ -179,6 +185,26 @@ truth. Two consequences: run them in filename order on any new environment, and
 never write a migration that creates a problem and then fixes it in a later
 file, because there is no mechanism guaranteeing the later one is ever applied.
 Adopting the Supabase CLI would remove this caveat.
+
+### Tiers live on `user_settings`, not in a billing table
+
+`tier` is `free` or `founder`; `stripe_customer_id` is the only link to Stripe.
+There is no `subscriptions` table, deliberately. Every user already has exactly
+one `user_settings` row (the `0002` trigger guarantees it), so there is no
+"billing row doesn't exist yet" case anywhere; `0003` already grants
+`service_role` what it needs here, where a new table would need its own grant;
+and the row already cascades from `auth.users`, so deletion stays complete.
+
+**Subscription status, period end and cancel-at-period-end are deliberately not
+stored.** The Stripe Customer Portal shows all three, and a local mirror of
+Stripe's state machine drifts from it. The app asks one question — is this user
+paying — and `tier` answers it. Settings renders "Active" from `tier` alone,
+because `tier` is only `founder` while the subscription is live.
+
+A partial unique index enforces one Stripe customer per user. That is not
+defensive tidiness: it prevents one person's payment granting another person's
+access, and it is what makes the billing webhook's `stripe_customer_id` lookup a
+real tenant filter rather than a cross-tenant read (see Auth and security).
 
 ### `daily_metrics` is written but barely read
 
@@ -667,6 +693,74 @@ Notable per-source behaviour:
 
 ---
 
+## The paywall: six walls
+
+Free connects two tools, Founder connects all four. That count is the **entire**
+paid boundary — briefs, chat, the daily email and on-demand generation are
+identical on both tiers, and nothing else is gated.
+
+A connector is one row in `integrations`, and rows are created down six code
+paths. Each path carries a check, and they are not interchangeable:
+
+| # | Where | Kind |
+|---|---|---|
+| 1 | `integrations/github/authorize` | pre-check |
+| 2 | `integrations/github/callback` | enforcement |
+| 3 | `integrations/supabase/authorize` | pre-check |
+| 4 | `integrations/supabase` — `save-oauth` branch | enforcement |
+| 5 | `integrations/plausible` | enforcement |
+| 6 | `integrations/stripe` | enforcement |
+
+**The four enforcement walls are what make the limit real.** They sit at the
+write. Remove any one and the limit is bypassable by calling that endpoint
+directly, because none of them can rely on the UI having hidden a button.
+
+**The two pre-checks enforce nothing the others don't.** They exist because both
+OAuth legs cost the user something *before* the write is reached: `authorize`
+sends them to install a GitHub App on their repositories, or to grant Supabase
+Management API access to their whole organisation. Refusing only at the callback
+would mean they granted a third party access for a connection that was never
+going to be allowed. The pre-check is courtesy; the callback is the boundary,
+and it stays because the callback is reachable directly.
+
+Placement within each route matters twice more. Wall 2 sits *before*
+`getInstallationToken`, so a refused install never mints a token. Walls 5 and 6
+sit *before* their `verify*` calls, so a refusal costs no round trip to
+Plausible or Stripe.
+
+**`github/repos` is deliberately not gated.** It updates `config.repos` on a row
+that already exists; gating it would break repo re-selection for free and paying
+users alike. Only *creating* a connector is limited.
+
+### The subtlety that will break if someone "simplifies" it
+
+`canAddConnector(userId, provider)` in `lib/billing.ts` counts the user's
+connectors **excluding the provider being written**, then compares to the limit.
+
+That exclusion is load-bearing. Every connector route writes with `upsert`, so a
+plain `count >= LIMIT` would refuse a free user at their limit who is re-saving
+something they already have — rotating a leaked Plausible key, or re-running the
+GitHub App install to change which repositories it can see (`setup_action=update`
+re-enters wall 2 for a user who already has a `github` row). They are at two, and
+one of the two is the row being rewritten. The exclusion makes the check ask "is
+this a new tool?" rather than "are you at the limit right now?".
+
+`app/onboarding/page.tsx` mirrors the same rule client-side to decide which
+steps render locked, counting raw `integrations` rows rather than the filtered
+connection flags — a legacy `github` row with no `installation_id` displays as
+disconnected but is still a row the server counts, and the two must agree about
+who is at the limit.
+
+### Downgrade is grandfathering
+
+When a subscription ends the webhook sets `tier = 'free'` and nothing else
+happens. Existing connectors keep collecting; only new ones are refused. No
+revocation logic, no "which two do we keep" decision, and — the reason it is
+written this way — a failed payment retry never destroys the encrypted
+third-party credentials in `integrations.access_token`.
+
+---
+
 ## Auth and security
 
 What is in place today, in one list — the sections below give the reasoning:
@@ -689,6 +783,11 @@ What is in place today, in one list — the sections below give the reasoning:
 | Prompt-injection clause in both system prompts | `brief/generate.ts`, `api/chat` |
 | Cron bearer token compared with `timingSafeEqual`, fails closed | `api/cron/hourly` |
 | Rate limits: 30 chat/5min, 1 brief/30s | per route |
+| Billing webhook authorised by Stripe signature, not session | `api/billing/webhook` |
+| Checkout return verifies the session belongs to the caller | `api/billing/return` |
+| Tier is never client-trusted; `/api/settings` cannot write it | zod allowlist in `api/settings` |
+| Billing key is restricted (`rk_`), four permissions | `lib/stripe.ts`, README §5.2 |
+| Stripe customer deleted before the account cascade | `api/account` |
 
 **Sign-in** is an emailed OTP verified in the browser
 (`app/login/page.tsx`) — not a magic-link redirect. The code length is a
@@ -876,6 +975,49 @@ error alerting for exactly this reason.
 **A failed collection writes no row.** Do not infer "zero" from an absent
 `daily_metrics` row.
 
+**The Stripe Customer Portal must be activated per environment, and its absence
+looks like a code bug.** Settings → Billing → Customer portal, separately in
+sandbox and in live. Without it `billingPortal.sessions.create` throws a
+configuration error at runtime — nothing in the code is wrong, and nothing in
+the dashboard says so.
+
+**Granting the tier does not depend on a webhook arriving.** A webhook is a
+push, and pushes fail — the local relay stops, a deploy lands mid-delivery, the
+endpoint is briefly unreachable — and if it were the only path then every one of
+those means somebody paid and the app never found out. So there are three
+layers, in order of when they act:
+
+1. **`/api/billing/return`** — where Checkout sends the customer back. It
+   *retrieves the session from Stripe* and grants the tier there and then.
+   Nothing has to be delivered for this to work, and it covers the only moment
+   that matters most: the one where money has just changed hands.
+2. **`/api/billing/webhook`** — everything that happens with nobody present:
+   renewal failure, cancellation at period end, an expiring card.
+3. **`scripts/audit-billing.mjs`** — reconciles both directions
+   against Stripe when the first two have missed something.
+
+The ownership check in layer 1 is not optional: `session_id` arrives in a query
+string, so without verifying the session's customer against the caller's stored
+`stripe_customer_id`, any signed-in user could paste a stranger's session id and
+be upgraded on their payment.
+
+**`stripe listen` only relays while it is running, and does not queue.** A local
+event sent while it is down is gone — Stripe never saw a failure to retry. This
+is a development-only concern; in production Stripe posts directly and retries
+failures for days. The secret it prints is also a *different value* from a hosted
+endpoint's, so carrying one across fails every signature check while looking
+configured.
+
+**`past_due` still counts as paid.** Stripe retries a failed card for around two
+weeks; demoting on the first decline creates support work for someone who is
+about to pay. See `PAID_STATUSES` in `lib/stripe.ts`.
+
+**Account deletion must cancel Stripe before the cascade, not after.** The
+cascade destroys `stripe_customer_id`, which is the only link to the
+subscription — reverse the order and a deleted user is billed forever with no
+record left to find them by. `scripts/audit-billing.mjs` is the
+backstop for when the in-request cancellation and its alert both fail.
+
 **`lib/sample.ts` is public-facing.** It renders on the landing page, so
 changing the `Brief` shape can break the marketing site, not just the app.
 
@@ -912,6 +1054,13 @@ Update this doc in the same change as the code when you:
 - add a **table that stores user data** → give it `on delete cascade` on
   `auth.users(id)`, or `DELETE /api/account` quietly stops being complete and
   the privacy policy stops being true
+- add state in an **external system that survives account deletion** → cancel or
+  delete it in `DELETE /api/account` before the cascade runs. The cascade only
+  reaches this database; a Stripe subscription outlives it and keeps charging a
+  user who no longer has an account
+- change **what the free tier includes, or where connectors are created** → the
+  paywall section's table of six walls, and the exclusion rule in
+  `lib/billing.ts` that the wall behaviour depends on
 - fix or newly discover a **silent failure** → Known issues
 - add an **animation, or anything else `BRANDING.md` forbids** → say so in
   Rendering *and* decide whether the branding rule is being amended or excepted;

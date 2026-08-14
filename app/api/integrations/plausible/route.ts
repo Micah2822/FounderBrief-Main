@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { encrypt } from "@/lib/crypto";
 import { verifyPlausible } from "@/lib/collectors/plausible";
+import { canAddConnector, CONNECTOR_LIMIT_MESSAGE } from "@/lib/billing";
 
 const Schema = z.object({
   domain: z
@@ -27,6 +28,12 @@ export async function POST(request: Request) {
     );
   }
   const { domain, key } = parsed.data;
+
+  // Before the verify call, not after: a rejected connection should not spend a
+  // round trip asking Plausible to validate a key it is about to discard.
+  if (!(await canAddConnector(user.id, "plausible"))) {
+    return NextResponse.json({ error: CONNECTOR_LIMIT_MESSAGE, code: "limit" }, { status: 402 });
+  }
 
   // Prove the pair works before storing anything
   try {

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { OnboardingFlow } from "@/components/OnboardingFlow";
 import { Wordmark } from "@/components/Wordmark";
+import { FREE_CONNECTOR_LIMIT } from "@/lib/billing";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,8 @@ const CONNECT_ERRORS: Record<string, string> = {
     "Supabase sent you back, but the security check didn't match. This usually means the attempt was started in another tab or took too long. Try connecting again.",
   supabase_token:
     "Supabase didn't complete the handshake. Try connecting again — or use the manual option to paste a key instead.",
+  limit:
+    "Free covers two connected tools, and you've connected two. Upgrade to Founder in Settings to add the rest — your brief works on what you already have.",
 };
 
 export default async function OnboardingPage({
@@ -36,10 +39,10 @@ export default async function OnboardingPage({
   if (!user) redirect("/login");
 
   const admin = createAdminClient();
-  const { data: integrations } = await admin
-    .from("integrations")
-    .select("provider, config")
-    .eq("user_id", user.id);
+  const [{ data: integrations }, { data: settings }] = await Promise.all([
+    admin.from("integrations").select("provider, config").eq("user_id", user.id),
+    admin.from("user_settings").select("tier").eq("user_id", user.id).maybeSingle(),
+  ]);
 
   // A github row without an installation_id was written by the old OAuth App and
   // can no longer mint a token. Treat it as disconnected so the user is offered
@@ -53,6 +56,23 @@ export default async function OnboardingPage({
   const connectError = searchParams.error
     ? (CONNECT_ERRORS[searchParams.error] ?? "That connection didn't complete. Try again.")
     : null;
+
+  // Mirrors canAddConnector() against rows already in hand, rather than making
+  // four more round trips to ask the same question. Counting `integrations`
+  // rather than the filtered flags above is deliberate: a legacy github row
+  // with no installation_id shows as disconnected, but it is still a row and
+  // the server still counts it, so the UI has to count it too or the two
+  // disagree about who is at the limit.
+  const providers = new Set((integrations ?? []).map((i) => i.provider));
+  const lockedFor = (p: string) =>
+    settings?.tier !== "founder" &&
+    [...providers].filter((x) => x !== p).length >= FREE_CONNECTOR_LIMIT;
+  const locked = {
+    github: lockedFor("github"),
+    supabase: lockedFor("supabase"),
+    stripe: lockedFor("stripe"),
+    plausible: lockedFor("plausible"),
+  };
 
   return (
     <main className="mx-auto max-w-[640px] px-6 py-14">
@@ -89,6 +109,7 @@ export default async function OnboardingPage({
         supabasePickingProject={searchParams.step === "supabase-project"}
         plausibleConnected={!!traffic}
         stripeConnected={!!stripe}
+        locked={locked}
       />
     </main>
   );

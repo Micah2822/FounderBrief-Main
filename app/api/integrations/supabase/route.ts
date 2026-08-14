@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { decrypt, encrypt } from "@/lib/crypto";
 import { discoverSchema, countInWindow } from "@/lib/collectors/supabase";
+import { canAddConnector, CONNECTOR_LIMIT_MESSAGE } from "@/lib/billing";
 import {
   getProjectServiceKey,
   listProjects,
@@ -127,6 +128,14 @@ export async function POST(request: Request) {
   if (body.action === "save-oauth") {
     const parsed = SaveOAuthSchema.safeParse(body);
     if (!parsed.success) return NextResponse.json({ error: "Invalid mapping" }, { status: 400 });
+
+    // Only this branch is gated. `list-projects` and `select-project` above are
+    // read-only probes that write nothing, and a Founder-tier user re-mapping
+    // an existing Supabase connector goes through both of them.
+    if (!(await canAddConnector(user.id, "supabase"))) {
+      return NextResponse.json({ error: CONNECTOR_LIMIT_MESSAGE, code: "limit" }, { status: 402 });
+    }
+
     const token = managementToken();
     if (!token) return NextResponse.json({ error: "supabase_reconnect" }, { status: 440 });
     const { project_ref, table, ts_column } = parsed.data;

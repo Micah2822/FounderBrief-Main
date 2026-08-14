@@ -23,6 +23,11 @@ const ALLOWED = [
     table: "user_settings",
     why: "the cron's whole job is to walk every onboarded user; selects no tenant data beyond scheduling fields",
   },
+  {
+    file: "app/api/billing/webhook/route.ts",
+    table: "user_settings",
+    why: "Stripe events carry no user_id, so the tenant is resolved by stripe_customer_id — a real tenant filter only because migration 0004 puts a unique index on that column. If that index is ever dropped, this exemption stops being true.",
+  },
 ];
 
 function walk(dir, out = []) {

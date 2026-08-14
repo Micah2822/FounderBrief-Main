@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { canAddConnector } from "@/lib/billing";
 
 // Where GitHub returns after the user installs the app. Unlike the OAuth App
 // this replaced, there is no code-for-token exchange and nothing secret to
@@ -52,6 +53,16 @@ export async function GET(request: Request) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.redirect(`${origin}/login`);
+
+  // Before minting, so a refused connection never issues a token it cannot use.
+  //
+  // This must stay tolerant of the re-install case: setup_action=update sends a
+  // user who already has a github row back through here, and canAddConnector
+  // excludes the provider being written, so someone at the limit can still
+  // change which repositories GitHub can see.
+  if (!(await canAddConnector(user.id, "github"))) {
+    return NextResponse.redirect(`${origin}/onboarding?error=limit`);
+  }
 
   // Mint once before saving. A bad app id, a mangled private key or a
   // half-completed install all surface here rather than as a silently empty

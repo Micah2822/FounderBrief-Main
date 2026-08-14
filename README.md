@@ -24,7 +24,7 @@ nightly (per user, at their send hour)
 The LLM never originates a number. If a cause isn't in the data, the brief says
 "cause unknown from connected data". Trust is the product.
 
-## Setup (~15 minutes)
+## Setup (~25 minutes)
 
 Create the env file first — every step below writes into it:
 
@@ -299,14 +299,162 @@ Two separate email paths, configured in two different places:
 OpenAI, briefs are fully deterministic (still correct); without Resend, no
 email is sent.
 
-### 5. Run
+### 5. Stripe billing
+
+Free accounts connect two tools; Founder ($19/month) connects all of them. This
+section sets up the Stripe side. It is unrelated to the Stripe *connector* users
+set up during onboarding, which reads a **user's** revenue from a restricted key
+they paste and needs no configuration from you. This is **your** Stripe account,
+the one that charges them.
+
+**A separate Stripe account, not a separate login.** Stripe uses "account" for
+two things: your login, and the businesses under it that you switch between
+top-left. Founder Brief needs its own business account, because payouts,
+customers, products, tax reporting and webhooks are all per-account — and
+because sharing one means another project's customer list is one API call from
+this app's key. Account switcher → **New account**.
+
+> **Check the account switcher before every step below.** With several accounts
+> on one login it is easy to create the product, the key or the webhook in the
+> wrong one, and **nothing in a credential says which account it came from** —
+> an `rk_test_…` from another project looks identical. The symptom is "No such
+> price" at checkout, or a live charge landing in the wrong business.
+
+**Sandbox first.** Stripe calls its isolated non-live environment either *test
+mode* (a toggle) or a *sandbox* (a picker), depending on the account — same
+thing, and this guide works in either. What is stable is the key prefix:
+`rk_test_…` is safe, `rk_live_…` moves real money. Products, prices, webhooks
+and portal configuration **do not cross between sandbox and live**, so every
+step here is done twice — once now, once at section 7 before launch — and the
+price id is different each time. That is expected, not a mistake.
+
+**5.1 Product and price.** Product catalogue → **+ Add product**:
+
+| Field | Value |
+|---|---|
+| Name | `Founder Brief — Founder` (shown at checkout and on the invoice) |
+| Description | one line, optional |
+| Tax category | **Software as a service — business use**. Not any "mobile" entry: there is no app-store build, this is a hosted web subscription |
+| Pricing model | Standard pricing |
+| Amount | `19.00`, `USD` |
+| Billing period | **Recurring**, Monthly |
+| Include tax in price | **No** — see below |
+| Free trial | none |
+
+Then copy the **price id** — `price_…`, from the pricing row, *not* the `prod_…`
+above it — into `STRIPE_PRICE_FOUNDER`.
+
+*Tax category* does nothing until Stripe Tax is enabled, which this app does not
+do. Set it correctly anyway; it is what Stripe Tax would use later.
+
+*Tax exclusive* (not included in the price) because inclusive makes $19 the
+total and carves the tax out of it — a 20% VAT sale would net $15.83 instead of
+$19, on every EU customer. Exclusive is also the norm for B2B, where an EU
+business with a VAT id pays no VAT at all under reverse charge. Note that Stripe
+lets a price move from unspecified to inclusive or exclusive **once** and then
+locks it; changing your mind later means a new price and migrating subscribers.
+
+**5.2 Restricted key.** Developers → API keys → **+ Create restricted key**.
+
+- *How will you be using this key?* → **Powering an integration you built**. The
+  key goes in this app's server code. Not "third-party application" (that is for
+  handing a key to software someone else wrote) and not "authorising an AI
+  agent" (that is standing MCP/CLI access).
+- *Permission template* → **Choose your own**. The "Recurring subscriptions and
+  billing" template grants around 40 permissions where this app uses four,
+  including invoice and usage writes it never calls — taking it would undo the
+  reason for using a restricted key at all.
+- Grant **Write** on exactly these, **None** on everything else:
+  **Customers**, **Checkout Sessions**, **Customer portal**, **Subscriptions**.
+
+Name it `founder-brief-billing` and copy the `rk_test_…` into
+`STRIPE_BILLING_SECRET_KEY`.
+
+Founder Brief never creates a charge or issues a refund, so a full secret key
+(`sk_`) would store authority the product never exercises. This keeps the
+property that **no `sk_` exists anywhere in the product** — the connector
+enforces the same rule on users' keys at its API boundary.
+
+> Restricted key permissions are **editable after creation**, so none of this is
+> one-way. If a call fails later, Stripe's error names the exact resource it
+> wanted; add that one rather than widening to a template.
+
+**5.3 Activate the Customer portal.** Settings → Billing → **Customer portal** →
+activate, with *Cancel subscriptions* and *Update payment methods* enabled.
+This is where cancellation, card updates and invoices live, which is why the app
+has no billing UI of its own.
+
+> Easy to skip, and it does not fail where you'd look for it: without an
+> activated portal, `billingPortal.sessions.create` throws a configuration error
+> at runtime that reads exactly like an application bug. It must be activated
+> separately in sandbox and in live.
+
+**5.4 Statement descriptor.** Settings → Business → Public details. This is what
+appears on your customers' card statements; if it is unset or unrecognisable you
+get chargebacks from people who don't recognise the charge.
+
+**5.5 Webhook.** Stripe tells the app about payments by POSTing to
+`/api/billing/webhook`. Nothing activates a subscription without it: checkout
+completing in the browser is not what grants access — the webhook is.
+
+That endpoint is public (Stripe sends no session cookie), so **the signature is
+the only thing standing between a stranger and a free `founder` tier**. It is
+verified against `STRIPE_BILLING_WEBHOOK_SECRET` on every request, and the
+secret is different in development and production.
+
+*In development*, install the [Stripe CLI](https://stripe.com/docs/stripe-cli),
+then:
+
+```bash
+stripe login
+stripe listen --forward-to localhost:3000/api/billing/webhook
+```
+
+It prints a `whsec_…` on start. **That is the value for `.env.local`** — it is
+not the same as the one the dashboard shows for a hosted endpoint, and using the
+dashboard's value locally fails every signature check. Leave `stripe listen`
+running while you test; it re-prints the same secret each time.
+
+*In production*, Developers → **Webhooks** → **Add endpoint**:
+
+- URL: `https://YOURAPP/api/billing/webhook`
+- Events: `checkout.session.completed`, `customer.subscription.created`,
+  `customer.subscription.updated`, `customer.subscription.deleted`
+
+Copy that endpoint's signing secret into Vercel as
+`STRIPE_BILLING_WEBHOOK_SECRET`. Like everything else in this section, the
+endpoint is per-environment — a sandbox endpoint never fires for live payments.
+
+**5.6 Environment variables.** Three, all from the steps above:
+
+| Var | Where it comes from | Dev | Production |
+|---|---|---|---|
+| `STRIPE_BILLING_SECRET_KEY` | 5.2 | `rk_test_…` | `rk_live_…` |
+| `STRIPE_PRICE_FOUNDER` | 5.1 | sandbox `price_…` | live `price_…` |
+| `STRIPE_BILLING_WEBHOOK_SECRET` | 5.5 | from `stripe listen` | from the hosted endpoint |
+
+Sandbox values go in `.env.local` and stay there. Live values go in Vercel's
+Production environment and nowhere else. **Every one of the six differs between
+the two columns** — the commonest way to break this is to carry one across.
+
+**5.7 Migration.** Apply `supabase/migrations/0004_billing.sql`, which adds
+`tier` and `stripe_customer_id` to `user_settings`. Migrations are applied by
+hand (see ARCHITECTURE › Data model). Everyone existing defaults to `free`.
+
+**Existing deployment.** If you are adding billing to a database that already
+has users, nothing else changes: they default to `free`, nobody is revoked, and
+anyone already holding three or four connectors keeps them — the limit blocks
+*new* connections only. Expect to see those accounts and do not treat them as a
+bug.
+
+### 6. Run
 
 ```bash
 npm install
 npm run dev
 ```
 
-### 6. Deploy (Vercel)
+### 7. Deploy (Vercel)
 
 1. Push to GitHub, import into Vercel.
 2. Add all env vars (set `NEXT_PUBLIC_APP_URL` to the production URL and
@@ -323,7 +471,19 @@ npm run dev
    returns `500`, the GitHub Action goes red, and GitHub emails you about the
    failed workflow. Silence or redirect *that* one under GitHub → Settings →
    Notifications → Actions.
-3. Once you know the production domain, replace `YOURAPP` everywhere it is
+3. **Redo section 5 in live mode.** Sandbox and live share nothing: create the
+   product and price again, create a new restricted key with the same four
+   permissions, **activate the Customer portal again**, and **add the webhook
+   endpoint** pointing at the production URL (section 5.5). That yields three
+   new values — `rk_live_…`, a live `price_…`, and the endpoint's own
+   `whsec_…` — which go in Vercel's Production environment only, with the
+   sandbox values left in `.env.local`. Stripe also needs business and bank
+   details before it will accept live payments, and that can require
+   verification — start it well before you plan to launch.
+
+   The webhook is the step whose absence is silent: checkout succeeds, the
+   customer is charged, and their tier never changes.
+4. Once you know the production domain, replace `YOURAPP` everywhere it is
    hardcoded outside the repo:
    - Supabase **Site URL** (section 1)
    - Supabase **Redirect URLs** (section 1)

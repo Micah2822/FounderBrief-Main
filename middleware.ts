@@ -52,7 +52,14 @@ export async function middleware(request: NextRequest) {
     // widened — and the gh_oauth_state / sb_oauth_state cookies are what
     // actually guard them against CSRF.
     path === "/api/integrations/github/callback" ||
-    path === "/api/integrations/supabase/callback";
+    path === "/api/integrations/supabase/callback" ||
+    // Stripe carries no session cookie, so the billing webhook cannot sit
+    // behind the session gate: without this the POST is redirected to /login,
+    // Stripe records the 307 as a successful delivery, and no subscription ever
+    // activates. The route is not unprotected — its Stripe signature check
+    // replaces the session as the authorisation boundary, which is exactly why
+    // that check must never be relaxed. See app/api/billing/webhook/route.ts.
+    path === "/api/billing/webhook";
 
   if (!user && !isPublic && !path.startsWith("/_next")) {
     const url = request.nextUrl.clone();

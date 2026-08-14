@@ -5,6 +5,20 @@ import { useRouter } from "next/navigation";
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
+// Every connector the product has, in onboarding order. Used to show a free
+// account which tools it is not currently able to add.
+const ALL_PROVIDERS = [
+  { provider: "github", label: "GitHub" },
+  { provider: "supabase", label: "Supabase" },
+  { provider: "stripe", label: "Stripe" },
+  { provider: "plausible", label: "Plausible" },
+];
+
+// Where Team / Growth enquiries go. A mailto rather than a form: it needs no
+// route, no table and no spam handling, and the tradeoff — enquiries live in an
+// inbox rather than the database — is the right one at this volume.
+const CONTACT_EMAIL = "info@fndrbrief.com";
+
 export function SettingsForm({
   email,
   timezone,
@@ -12,6 +26,8 @@ export function SettingsForm({
   emailEnabled,
   goal: initialGoal,
   integrations,
+  tier,
+  connectorLimit,
 }: {
   email: string;
   timezone: string;
@@ -19,6 +35,15 @@ export function SettingsForm({
   emailEnabled: boolean;
   goal: string;
   integrations: { provider: string; detail: string }[];
+  tier: "free" | "founder";
+  /**
+   * Passed in rather than imported from `lib/billing`: this is a client
+   * component, and that module reaches the service-role client. Nothing would
+   * leak today — the key is read inside a function body, so a client bundle
+   * would only ever see `undefined` — but importing a server-only module into
+   * the browser is how that stops being true later.
+   */
+  connectorLimit: number;
 }) {
   const router = useRouter();
   const [tz, setTz] = useState(timezone);
@@ -29,6 +54,48 @@ export function SettingsForm({
   const [busy, setBusy] = useState(false);
 
   const browserTz = typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
+
+  const connected = new Set(integrations.map((i) => i.provider));
+  const atLimit = tier === "free" && integrations.length >= connectorLimit;
+
+  const [billingBusy, setBillingBusy] = useState(false);
+  const [billingError, setBillingError] = useState<string | null>(null);
+
+  /**
+   * Both billing buttons hand off to a Stripe-hosted page. Nothing about a card
+   * is ever typed into this app, which is why there is no billing UI here
+   * beyond these two buttons.
+   *
+   * `busy` is never cleared on success: the browser is navigating away, and
+   * resetting it would flash the button back to its idle label mid-redirect.
+   */
+  async function openBilling(path: string, fallback: string) {
+    setBillingBusy(true);
+    setBillingError(null);
+    try {
+      const res = await fetch(path, { method: "POST" });
+      const body = await res.json();
+      if (res.ok && body.url) {
+        window.location.href = body.url;
+        return;
+      }
+      // 409 means the webhook already promoted them and this tab is stale.
+      if (res.status === 409) {
+        router.refresh();
+        setBillingError("You're already on Founder — reloading.");
+      } else {
+        setBillingError(fallback);
+      }
+    } catch {
+      setBillingError(fallback);
+    }
+    setBillingBusy(false);
+  }
+
+  const upgrade = () =>
+    openBilling("/api/billing/checkout", "Couldn't open checkout. Try again.");
+  const openPortal = () =>
+    openBilling("/api/billing/portal", "Couldn't open billing. Try again.");
 
   async function save() {
     setBusy(true);
@@ -142,9 +209,96 @@ export function SettingsForm({
               </button>
             </div>
           ))}
-          <a href="/onboarding" className="inline-block font-mono text-[12px] text-muted hover:text-ink pt-2">
-            + Connect a tool
-          </a>
+          {/* The tools a free account at its limit cannot add. Shown rather
+              than hidden so the limit is visible before it is hit, and marked
+              with `faint` plus a mono tag rather than a badge or a lock icon —
+              BRANDING reserves colour for deltas, so the demotion in weight is
+              what carries the locked state. */}
+          {atLimit &&
+            ALL_PROVIDERS.filter((p) => !connected.has(p.provider)).map((p) => (
+              <div
+                key={p.provider}
+                className="flex items-center justify-between text-[14px] text-faint"
+              >
+                <span>{p.label}</span>
+                <span className="font-mono text-[12px]">Founder</span>
+              </div>
+            ))}
+          {atLimit ? (
+            <p className="border-t border-line mt-3 pt-3 text-[13px] text-muted leading-relaxed">
+              {integrations.length} of {connectorLimit} used. Founder connects
+              the rest.
+            </p>
+          ) : (
+            <a
+              href="/onboarding"
+              className="inline-block font-mono text-[12px] text-muted hover:text-ink pt-2"
+            >
+              + Connect a tool
+            </a>
+          )}
+        </div>
+      </section>
+
+      <section className="border-t border-line pt-8">
+        <p className="eyebrow mb-4">Plan</p>
+        <div className="max-w-md">
+          <div className="ledger-row">
+            <span className="text-[15px]">Current plan</span>
+            <span className="ledger-leader" aria-hidden />
+            <span className="ledger-value">
+              {tier === "founder" ? "Founder" : "Free"}
+            </span>
+          </div>
+          <div className="ledger-row">
+            <span className="text-[15px]">Connected tools</span>
+            <span className="ledger-leader" aria-hidden />
+            <span className="ledger-value">
+              {tier === "founder"
+                ? integrations.length
+                : `${integrations.length} of ${connectorLimit}`}
+            </span>
+          </div>
+          {tier === "free" ? (
+            <>
+              <p className="text-[14px] text-muted leading-relaxed mt-4">
+                Free covers two connected tools. Founder removes the limit — $19
+                a month, cancel any time.
+              </p>
+              <button
+                onClick={upgrade}
+                disabled={billingBusy}
+                className="btn-primary mt-4"
+              >
+                {billingBusy ? "Opening…" : "Upgrade to Founder"}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={openPortal}
+                disabled={billingBusy}
+                className="btn-ghost mt-4"
+              >
+                {billingBusy ? "Opening…" : "Manage billing"}
+              </button>
+              <p className="text-[13px] text-muted leading-relaxed mt-3">
+                Invoices, card details and cancellation open in Stripe.
+              </p>
+            </>
+          )}
+          {billingError && (
+            <p className="text-[13px] text-oxide mt-3">{billingError}</p>
+          )}
+          <p className="font-mono text-[12px] text-muted mt-4">
+            Team or growth company?{" "}
+            <a
+              href={`mailto:${CONTACT_EMAIL}`}
+              className="hover:text-ink transition-colors"
+            >
+              Get in touch
+            </a>
+          </p>
         </div>
       </section>
 

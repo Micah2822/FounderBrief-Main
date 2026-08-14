@@ -23,6 +23,7 @@ export function OnboardingFlow({
   supabasePickingProject,
   plausibleConnected,
   stripeConnected,
+  locked,
 }: {
   githubConnected: boolean;
   githubRepos: string[];
@@ -30,6 +31,8 @@ export function OnboardingFlow({
   supabasePickingProject: boolean;
   plausibleConnected: boolean;
   stripeConnected: boolean;
+  /** Per provider: connecting this one would exceed the free plan's limit. */
+  locked: Record<"github" | "supabase" | "stripe" | "plausible", boolean>;
 }) {
   const router = useRouter();
   const [reposSaved, setReposSaved] = useState(githubRepos.length > 0);
@@ -101,34 +104,60 @@ export function OnboardingFlow({
           fresh state instead of leaving its stale "saved" value on screen.
           Deliberately not keyed on `pickingProject`, which changes mid-flow and
           would throw away the project list the user is choosing from. */}
-      <GitHubStep
-        key={`github-${githubConnected}`}
-        step={1}
-        connected={githubConnected}
-        initialRepos={githubRepos}
-        onSaved={() => setReposSaved(true)}
-      />
-      <SupabaseStep
-        key={`supabase-${supabaseConnected}`}
-        step={2}
-        connected={supabaseConnected}
-        pickingProject={supabasePickingProject}
-        onSaved={() => setSbSaved(true)}
-      />
-      <StripeStep
-        key={`stripe-${stripeConnected}`}
-        step={3}
-        connected={stripeConnected}
-        onSaved={() => setStSaved(true)}
-      />
-      <PlausibleStep
-        key={`plausible-${plausibleConnected}`}
-        step={4}
-        connected={plausibleConnected}
-        onSaved={() => setPlSaved(true)}
-      />
+      {/* A locked step replaces the connector entirely rather than disabling
+          its form: there is nothing useful to do inside it, and a dead form is
+          a worse answer than a sentence explaining why. A step that is already
+          connected is never locked — the limit only refuses *new* tools.
 
-      <section className="rise rise-5 border-t border-line pt-8">
+          `locked` is computed on the server at page load, so every onSaved
+          below calls router.refresh(): connecting a tool changes how many
+          remain available, and without the refresh the server component never
+          re-runs. The steps after the one you just connected would keep
+          offering a form that the wall then rejects with a 402. */}
+      {locked.github && !githubConnected ? (
+        <LockedStep step={1} label="GitHub" />
+      ) : (
+        <GitHubStep
+          key={`github-${githubConnected}`}
+          step={1}
+          connected={githubConnected}
+          initialRepos={githubRepos}
+          onSaved={() => { setReposSaved(true); router.refresh(); }}
+        />
+      )}
+      {locked.supabase && !supabaseConnected ? (
+        <LockedStep step={2} label="Supabase" />
+      ) : (
+        <SupabaseStep
+          key={`supabase-${supabaseConnected}`}
+          step={2}
+          connected={supabaseConnected}
+          pickingProject={supabasePickingProject}
+          onSaved={() => { setSbSaved(true); router.refresh(); }}
+        />
+      )}
+      {locked.stripe && !stripeConnected ? (
+        <LockedStep step={3} label="Revenue" />
+      ) : (
+        <StripeStep
+          key={`stripe-${stripeConnected}`}
+          step={3}
+          connected={stripeConnected}
+          onSaved={() => { setStSaved(true); router.refresh(); }}
+        />
+      )}
+      {locked.plausible && !plausibleConnected ? (
+        <LockedStep step={4} label="Website traffic" />
+      ) : (
+        <PlausibleStep
+          key={`plausible-${plausibleConnected}`}
+          step={4}
+          connected={plausibleConnected}
+          onSaved={() => { setPlSaved(true); router.refresh(); }}
+        />
+      )}
+
+      <section id="step-5" className="rise rise-5 border-t border-line pt-8">
         <p className="eyebrow mb-3">Step 5 — Your first brief</p>
         <label className="block text-[14px] text-muted leading-relaxed mb-2 max-w-md">
           What are you focused on right now?{" "}
@@ -205,6 +234,70 @@ function ToolRequest() {
 }
 
 // ── Step 1: GitHub ──────────────────────────────────────────────────────
+
+/**
+ * A connector step the free plan cannot reach.
+ *
+ * Deliberately not a dead end. The founder still has two tools connected, step
+ * 5 below still works, and the copy says so — someone who has never seen a
+ * brief should not be asked for money before they have. Leading with what still
+ * happens ("your brief starts tomorrow") rather than with what is missing is
+ * also what stops this reading as a sales interstitial.
+ *
+ * The upgrade button posts to the same checkout route Settings uses. It is a
+ * primary button here and the "continue" beside it is a plain link, because the
+ * founder should be able to finish onboarding without paying — but the offer
+ * should not be hidden either, since this is the moment they actually want the
+ * third tool.
+ */
+function LockedStep({ step, label }: { step: number; label: string }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function upgrade() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/billing/checkout", { method: "POST" });
+      const body = await res.json();
+      if (res.ok && body.url) {
+        window.location.href = body.url;
+        return;
+      }
+      setError("Couldn't open checkout. Try again.");
+    } catch {
+      setError("Couldn't open checkout. Try again.");
+    }
+    setBusy(false);
+  }
+
+  return (
+    <section className={`rise rise-${step} border-t border-line pt-8`}>
+      <p className="eyebrow mb-3">
+        Step {step} — {label}
+      </p>
+      <p className="font-serif text-[19px] leading-relaxed text-muted max-w-md">
+        Free covers two connected tools, and you&apos;ve connected two.
+      </p>
+      <p className="text-[14px] text-muted leading-relaxed mt-3 max-w-md">
+        Your brief starts tomorrow morning on what you have. Founder connects{" "}
+        {label} and everything else — $19 a month, cancel any time.
+      </p>
+      <div className="flex items-center gap-4 mt-5">
+        <button onClick={upgrade} disabled={busy} className="btn-primary">
+          {busy ? "Opening…" : "Upgrade — $19/month"}
+        </button>
+        <a
+          href="#step-5"
+          className="font-mono text-[12px] text-muted hover:text-ink transition-colors"
+        >
+          Continue with two tools
+        </a>
+      </div>
+      {error && <p className="text-[13px] text-oxide mt-3">{error}</p>}
+    </section>
+  );
+}
 
 function GitHubStep({
   step,

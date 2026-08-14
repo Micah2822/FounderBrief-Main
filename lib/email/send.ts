@@ -79,6 +79,44 @@ function esc(s: string): string {
 }
 
 /**
+ * Emails the operator when an account was deleted but its Stripe customer could
+ * not be, so the subscription is still billing someone who no longer has an
+ * account. Same rule as `sendCronAlertEmail` below: ids only, never the error
+ * text — a Stripe error can quote a request URL.
+ *
+ * Best-effort by nature: silent if `ALERT_EMAIL` is unset, and Resend can be
+ * down. `scripts/audit-billing.mjs` is the backstop that does not depend on an
+ * email arriving.
+ */
+export async function sendOrphanedCustomerAlert(
+  userId: string,
+  stripeCustomerId: string
+): Promise<boolean> {
+  const to = process.env.ALERT_EMAIL;
+  if (!to || !process.env.RESEND_API_KEY) return false;
+
+  const { Resend } = await import("resend");
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const { error } = await resend.emails.send({
+    from: process.env.EMAIL_FROM || "Founder Brief <onboarding@resend.dev>",
+    to,
+    subject: `Founder Brief — orphaned Stripe customer ${stripeCustomerId}`,
+    text:
+      `An account was deleted but its Stripe customer was not.\n` +
+      `Until it is, that customer is still being billed.\n\n` +
+      `user id      ${userId}\n` +
+      `customer id  ${stripeCustomerId}\n\n` +
+      `Stripe dashboard -> Customers -> ${stripeCustomerId} -> Delete.\n\n` +
+      `Detail is in the Vercel logs.`,
+  });
+  if (error) {
+    console.error("resend alert error", error);
+    return false;
+  }
+  return true;
+}
+
+/**
  * Emails the operator when a cron run failed some users.
  *
  * Configuration is one variable: `ALERT_EMAIL` is both the on/off switch and

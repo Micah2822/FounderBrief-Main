@@ -123,46 +123,55 @@ export function BriefView({
         )}
       </section>
 
-      {/* Honest gaps */}
-      {brief.gaps.length > 0 && (
-        <footer className="rise rise-5 mt-12 border-t border-line pt-4">
-          {brief.gaps.map((g, i) => (
-            <p key={i} className="text-[13px] text-muted leading-relaxed">
-              {g}
-            </p>
-          ))}
-          {/* A broken integration gets a named link, because "GitHub is
-              connected but couldn't be read" is useless without somewhere to
-              go — a stale installation_id produced exactly that dead end.
-              Driven by `reconnect`, not by matching the sentence: prose is not
-              an API, and rewording a gap should not remove the fix for it. */}
-          {brief.reconnect?.length ? (
-            <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
-              {brief.reconnect.map((provider) => (
-                <Link
-                  key={provider}
-                  href="/onboarding"
-                  className="font-mono text-[12px] text-ink underline hover:no-underline"
-                >
-                  Reconnect {PROVIDER_LABEL[provider] ?? provider} →
-                </Link>
-              ))}
-            </p>
-          ) : (
-            /* Nothing is broken, something is simply absent — a quiet offer
-               next to the other honest gaps, never a priority. "Connect
-               another tool" is our interest, not the founder's work today. */
-            brief.gaps.some((g) => g.includes("isn't connected")) && (
+      {/* Honest gaps, and the way out of them.
+          The footer renders even with no gaps: the connect link used to be
+          conditional on a gap containing "isn't connected", which meant it
+          silently vanished the moment a brief happened to have nothing to
+          report — the one affordance for adding a tool disappearing for
+          reasons a founder could not see or predict. Gaps are still driven by
+          the data; the link is now simply always there. */}
+      <footer className="rise rise-5 mt-12 border-t border-line pt-4">
+        {brief.gaps.map((g, i) => (
+          <p key={i} className="text-[13px] text-muted leading-relaxed">
+            {g}
+          </p>
+        ))}
+        {/* A broken integration gets a named link, because "GitHub is
+            connected but couldn't be read" is useless without somewhere to
+            go — a stale installation_id produced exactly that dead end.
+            Driven by `reconnect`, not by matching the sentence: prose is not
+            an API, and rewording a gap should not remove the fix for it. */}
+        {brief.reconnect?.length ? (
+          <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+            {brief.reconnect.map((provider) => (
               <Link
+                key={provider}
                 href="/onboarding"
-                className="inline-block mt-3 font-mono text-[12px] text-muted hover:text-ink transition-colors"
+                className="font-mono text-[12px] text-ink underline hover:no-underline"
               >
-                Connect a tool →
+                Reconnect {PROVIDER_LABEL[provider] ?? provider} →
               </Link>
-            )
-          )}
-        </footer>
-      )}
+            ))}
+          </p>
+        ) : (
+          /* Nothing is broken. A quiet, permanent offer — muted, mono, below
+             the brief itself, never a priority. "Connect another tool" is our
+             interest, not the founder's work today, which is why it stays this
+             small rather than becoming a card or a button.
+
+             Suppressed on `sample`, which is the specimen brief on the public
+             landing page: a signed-out visitor clicking it lands on /login,
+             and the marketing page should not carry an app affordance. */
+          !sample && (
+            <Link
+              href="/onboarding"
+              className="inline-block mt-3 font-mono text-[12px] text-muted hover:text-ink transition-colors"
+            >
+              Connect a tool →
+            </Link>
+          )
+        )}
+      </footer>
     </article>
   );
 }

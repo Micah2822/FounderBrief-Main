@@ -122,8 +122,7 @@ export default function PrivacyPage() {
         <section>
           <p className="eyebrow mb-2">Contact</p>
           <p className="text-muted">
-            Questions: reply to any brief email, or write to
-            privacy@founderbrief.app.
+            Questions: write to info@fndrbrief.com.
           </p>
         </section>
       </div>

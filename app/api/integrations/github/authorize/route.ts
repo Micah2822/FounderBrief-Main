@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { installUrl, newState } from "@/lib/github/app-auth";
 import { SECURE_COOKIES } from "@/lib/cookies";
+import { canAddConnector } from "@/lib/billing";
 
 // Sends the user to GitHub to install the app. GitHub's own screen is where
 // they choose which repositories the app can see; the picker in onboarding is a
@@ -10,6 +11,14 @@ export async function GET(request: Request) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.redirect(new URL("/login", request.url));
+
+  // Checked before the redirect so a free user at their limit never installs a
+  // GitHub App on their repositories for a connection that will then be
+  // refused. The callback checks again — that one is the enforcement, since it
+  // is reachable directly.
+  if (!(await canAddConnector(user.id, "github"))) {
+    return NextResponse.redirect(new URL("/onboarding?error=limit", request.url));
+  }
 
   let url: string;
   const state = newState();
