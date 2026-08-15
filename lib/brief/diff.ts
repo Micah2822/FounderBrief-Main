@@ -150,6 +150,25 @@ export function findGaps(facts: Facts): string[] {
 }
 
 /**
+ * A gap about integration *state* rather than about the founder's data.
+ *
+ * `gaps` mixes two kinds of line. "No new signups in 7 days" is derived from
+ * collected data and is real material for an insight. "Analytics isn't
+ * connected" is a statement about our own plumbing, and handing it to the LLM
+ * invites exactly what happened: an insight reading "the lack of website
+ * traffic analytics hampers our understanding of user interactions" — an
+ * absence reported as a finding, in our voice, about our problem, duplicating
+ * a line already rendered at the foot of the page.
+ *
+ * Matched on "connected", which every connector-state line in `findGaps()`
+ * contains and no data-derived line does. **Keep it that way**: a new gap
+ * about connection state must use the word, or it will reach the model.
+ */
+export function isConnectorGap(gap: string): boolean {
+  return /\bconnected\b/i.test(gap);
+}
+
+/**
  * Commit messages that name an activity but no outcome.
  *
  * Reading "wip" back to a founder is worse than saying nothing — it looks like

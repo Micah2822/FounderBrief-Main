@@ -18,6 +18,7 @@ import {
   baselinePriorities,
   buildLedger,
   findGaps,
+  isConnectorGap,
   numbersAreGrounded,
 } from "@/lib/brief/diff";
 import type { Brief, Facts, IntegrationRow, UserSettings } from "@/lib/types";
@@ -298,6 +299,8 @@ Hard rules:
 - Insight: 2 to 3 sentences. Cover every source that moved, most consequential first — do not drop a source because another one is more alarming. A founder who shipped all day and lost signups needs to see both; reporting only the bad half reads as though the work went unnoticed.
 - Name what was shipped, don't count it. The commit_subjects field says what the work actually was: "you shipped account deletion and error alerting" is worth ten times "you shipped 5 commits". Summarise them into plain outcomes; skip vague ones like "fix", "wip" or "updating docs" rather than listing them.
 - Priorities: 1 to 3 imperatives the founder should do TODAY, each grounded in the facts (open PRs, signup movement, shipping activity). Short — under 15 words each. Never return an empty or whitespace-only string.
+- The insight describes what the data SHOWS, never what is missing. Never mention a tool being unconnected, absent analytics, or anything limiting what we can see — that is our plumbing, not the founder's morning. Write about the sources you were given and stop.
+- Write to the founder as "you". Never "we" or "our".
 - One priority per problem. If signups have stalled that is ONE instruction, not two — never follow "drive more signups" with "work out why signups stopped", which is the same problem restated. Each priority must act on a different fact. Three slots spent on one problem is worse than one priority and silence.
 - NEVER make connecting, reconnecting, configuring or buying a tool a priority. "Connect analytics", "set up Stripe", "add tracking" and anything like them are forbidden, however little other data exists. The gaps list tells the founder what isn't connected; it is not a source of work for the day. A priority must be something that moves the business, not something that improves our data collection.
 - Rank them: the FIRST is the single most important thing today. Two strong priorities beat three, and one is fine. The third slot is not a target to fill — it exists only when a third independent fact genuinely warrants action today. Reaching for something to put there is how filler gets written.
@@ -340,6 +343,19 @@ const CONNECT_VERB = /\b(connect|reconnect|integrate|hook up|link up)\b(?!\s+wit
 const DATA_COLLECTION = /\b(analytics|tracking|telemetry|instrumentation|data collection)\b/i;
 const SETUP_OR_IMPROVE = /\b(set ?up|configure|enable|install|implement|start|begin|add|improv(e|ing)|focus on)\b/i;
 
+/**
+ * An insight talking about what we cannot see rather than what happened.
+ *
+ * Withholding connector gaps from the prompt is the real fix; this is the
+ * backstop, because the model reached the same material once already through a
+ * rule that only covered priorities. It fires on absence-plus-data-source
+ * phrasing ("lack of analytics", "without tracking") and on integration-state
+ * talk, while leaving ordinary absences alone — "no new signups" is the
+ * product working.
+ */
+const MENTIONS_MISSING_DATA =
+  /\b(is|isn'?t|are|aren'?t|not|no|lack of|without|missing|absence of)\b[^.]{0,40}\b(connected|analytics|tracking|telemetry|integration)\b/i;
+
 function isConnectorChore(text: string): boolean {
   if (CONNECT_VERB.test(text)) return true;
   if (DATA_COLLECTION.test(text) && SETUP_OR_IMPROVE.test(text)) return true;
@@ -373,6 +389,15 @@ async function polishWithLLM(
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const allowed = allowedNumbers(facts);
 
+  // What isn't connected is withheld from the model entirely. Telling it not to
+  // mention something it can see is a request; not showing it is a guarantee —
+  // and the prompt already forbade connector *todos*, which it obeyed while
+  // writing the same material into the insight instead.
+  const visible: Facts = {
+    ...facts,
+    gaps: facts.gaps.filter((gap) => !isConnectorGap(gap)),
+  };
+
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await client.responses.create({
@@ -386,7 +411,7 @@ async function polishWithLLM(
           facts.github?.uses_prs === false
             ? "IMPORTANT: this founder pushes straight to the default branch and does not use pull requests. Never suggest opening, reviewing, or merging a PR, and never treat a pull request count as a measure of their progress. Commits and deployments are how they ship.\n\n"
             : ""
-        }Facts for ${facts.weekday} ${facts.date}:\n${JSON.stringify(facts, null, 2)}${
+        }Facts for ${facts.weekday} ${facts.date}:\n${JSON.stringify(visible, null, 2)}${
           attempt === 0
             ? ""
             : "\n\nThe previous attempt was rejected for repeating a template almost word for word. Write it again from the facts, in your own words, and say what the commit messages show was actually built."
@@ -419,6 +444,7 @@ async function polishWithLLM(
       if (!returned.length) reasons.push("no priorities returned");
       if (!numbersAreGrounded(everything, allowed)) reasons.push("ungrounded number");
       if (isEcho(insight, fallbackInsight)) reasons.push("echoed the baseline");
+      if (MENTIONS_MISSING_DATA.test(insight)) reasons.push("insight discussed missing data");
 
       if (!reasons.length) {
         if (!priorities.length) {
