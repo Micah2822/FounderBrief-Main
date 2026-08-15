@@ -149,6 +149,25 @@ export function findGaps(facts: Facts): string[] {
   return gaps;
 }
 
+/**
+ * Commit messages that name an activity but no outcome.
+ *
+ * Reading "wip" back to a founder is worse than saying nothing — it looks like
+ * the brief tried to be useful and failed. But a blunt prefix match is wrong
+ * too: "updating docs" is noise while "updating docs and adding sign out
+ * button on onboarding page" is not, and they start with the same word. Length
+ * separates them, because a subject that says something real needs room to say
+ * it.
+ */
+const NOISE_ONLY = /^(wip|fix(es|ed)?|typo|minor|tweak|cleanup|misc|chore|tests?|refactor|updat(e|ed|ing)? ?docs?|docs?|documentation)[.!]?$/i;
+const NOISE_PREFIX = /^(wip|fix|updat|tweak|cleanup|typo|misc|chore|refactor|doc)/i;
+
+function isVagueSubject(subject: string): boolean {
+  const s = subject.trim();
+  if (NOISE_ONLY.test(s)) return true;
+  return s.length <= 30 && NOISE_PREFIX.test(s);
+}
+
 /** Baseline insight: honest, cause-free, always available. */
 export function baselineInsight(facts: Facts): string {
   const parts: string[] = [];
@@ -229,6 +248,17 @@ export function baselineInsight(facts: Facts): string {
         bits.push(`${g.deployments} deployment${g.deployments === 1 ? "" : "s"}`);
       }
       parts.push(`You shipped ${bits.join(" and ")} ${when}.`);
+
+      // Name the work, not just the volume. The subjects are already collected
+      // for the LLM; without this the deterministic path — which is what ships
+      // whenever OPENAI_API_KEY is absent or a polish attempt is rejected —
+      // can only ever report a count, and "3 commits" tells a founder nothing
+      // they didn't already know.
+      const named = (g.commit_subjects ?? [])
+        .filter((sub) => !isVagueSubject(sub))
+        .slice(0, 2)
+        .map((sub) => (sub.length > 70 ? `${sub.slice(0, 69)}…` : sub));
+      if (named.length) parts.push(`Most recently: ${named.join("; ")}.`);
     }
   }
 
