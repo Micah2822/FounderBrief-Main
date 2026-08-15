@@ -41,9 +41,18 @@ export async function POST(request: Request) {
 
   try {
     await verifyStripe(key);
-  } catch {
+  } catch (e) {
+    // Stripe names the exact permission that is missing. Replacing that with
+    // our own sentence made every failure look identical and told the founder
+    // to check two things when Stripe already knew which one was wrong — and
+    // our wording goes stale every time Stripe redesigns the permission form.
+    const detail = e instanceof Error ? e.message : "";
     return NextResponse.json(
-      { error: "Stripe rejected that key. It needs read access to Charges and Customers." },
+      {
+        error: detail
+          ? `${detail} Set Charges and Customers to Read on the key.`
+          : "Stripe rejected that key. It needs read access to Charges and Customers.",
+      },
       { status: 422 }
     );
   }

@@ -740,13 +740,51 @@ function StripeStep({
         <Done provider="stripe" text="Tracking revenue and new customers" />
       ) : (
         <>
-          <p className="text-[14px] text-muted leading-relaxed mb-4 max-w-md">
-            If you have paying customers, connect Stripe to see revenue in your
-            brief. This needs a <em>restricted</em> key (Developers → API keys →
-            Create restricted key) with read access to Charges and Customers,
-            and nothing else. Secret keys are rejected — we never hold anything
-            that could move your money.
+          {/* Two paths, because the right one depends on the founder. Stripe's
+              permission list runs to dozens of collapsed categories, so
+              "set these two and check the rest" is a real chore — but it is
+              also the only way to guarantee least access. Recommend the fast
+              path and let the connect step catch a missing permission, which
+              it now can: verifyStripe() tests both resources and passes
+              Stripe's own message back, naming exactly what to add. */}
+          <p className="text-[14px] text-muted leading-relaxed mb-3 max-w-md">
+            Connect Stripe to see revenue and new customers in your brief.
           </p>
+          <div className="text-[14px] text-muted leading-relaxed mb-4 max-w-md">
+            <p className="mb-2">
+              In Stripe, go to{" "}
+              <a
+                href="https://dashboard.stripe.com/apikeys"
+                target="_blank"
+                rel="noreferrer"
+                className="text-ink underline hover:no-underline"
+              >
+                Developers → API keys
+              </a>
+              , choose <span className="text-ink">Create restricted key</span>, then{" "}
+              <span className="text-ink">Providing this key to a third-party application</span>.
+              From there, either:
+            </p>
+            <ul className="space-y-1.5">
+              <li className="flex gap-2">
+                <span className="font-mono text-[12px] text-faint pt-[3px]">→</span>
+                <span>
+                  <span className="text-ink">Quickest</span> — create the key as
+                  it is. If a permission is missing we&rsquo;ll tell you which one.
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="font-mono text-[12px] text-faint pt-[3px]">→</span>
+                <span>
+                  <span className="text-ink">Least access</span> — tick{" "}
+                  <span className="text-ink">Customise</span> and set only{" "}
+                  <span className="text-ink">Charges</span> and{" "}
+                  <span className="text-ink">Customers</span> to{" "}
+                  <span className="text-ink">Read</span>.
+                </span>
+              </li>
+            </ul>
+          </div>
           <form onSubmit={save} className="space-y-3 max-w-md">
             <input
               value={key}
@@ -761,7 +799,8 @@ function StripeStep({
             </button>
           </form>
           <p className="text-[12px] text-faint mt-3">
-            Optional — most founders here are pre-revenue. Your brief works
+            Secret keys are rejected, so nothing we store can move your money.
+            Optional — most founders here are pre-revenue, and your brief works
             fully without it.
           </p>
         </>

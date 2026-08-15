@@ -87,10 +87,34 @@ export async function collectRevenue(
 }
 
 /** Used at connect time to prove the key works and can read charges. */
+/**
+ * Check the key can read **both** resources the brief needs.
+ *
+ * This used to test `/charges` only, so a key granted Charges but not Customers
+ * connected cleanly, showed a tick, and then failed every night when the brief
+ * counted new customers — the founder having no reason to suspect the key.
+ * Stripe's permission list is grouped into collapsed categories, so granting
+ * one and missing the other is the likely mistake, not an unlikely one.
+ *
+ * Stripe's own message names the missing permission ("This API key does not
+ * have the required permissions..."), which is far more useful than anything we
+ * could write, and stays correct when Stripe redesigns its permission UI.
+ * Passed through verbatim rather than replaced.
+ */
 export async function verifyStripe(key: string): Promise<void> {
-  const res = await fetch(`${BASE}/charges?limit=1`, {
-    headers: { Authorization: `Bearer ${key}` },
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`Stripe verification failed (${res.status})`);
+  for (const resource of ["charges", "customers"] as const) {
+    const res = await fetch(`${BASE}/${resource}?limit=1`, {
+      headers: { Authorization: `Bearer ${key}` },
+      cache: "no-store",
+    });
+    if (res.ok) continue;
+
+    const detail = await res
+      .json()
+      .then((b) => b?.error?.message as string | undefined)
+      .catch(() => undefined);
+    throw new Error(
+      detail ?? `Stripe rejected this key when reading ${resource} (${res.status}).`
+    );
+  }
 }
