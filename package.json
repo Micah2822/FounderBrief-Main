@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "check:scoping": "node scripts/check-tenant-scoping.mjs"
+    "check": "npm run check:scoping && npm run check:api-auth",
+    "check:scoping": "node scripts/check-tenant-scoping.mjs",
+    "check:api-auth": "node scripts/check-api-auth.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

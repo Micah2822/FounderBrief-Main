@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useGoToBrief } from "@/lib/use-go-to-brief";
 
 export function RefreshBrief() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
+  const goToBrief = useGoToBrief();
 
   async function refresh() {
     setBusy(true);
@@ -25,8 +25,7 @@ export function RefreshBrief() {
     // empty the route falls forward to today, and the home page shows the
     // *newest* brief_date — so without this the founder could land back on the
     // empty one they were trying to get away from.
-    if (body?.brief?.brief_date) router.push(`/?date=${body.brief.brief_date}`);
-    router.refresh();
+    goToBrief(body?.brief?.brief_date ? `/?date=${body.brief.brief_date}` : null);
   }
 
   return (

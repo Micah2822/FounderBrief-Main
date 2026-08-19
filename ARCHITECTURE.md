@@ -246,6 +246,22 @@ row is not a zero.
    Two attempts, validated against the allowlist; on failure the baseline wins.
 7. **Store** the `Brief` as a `briefs` upsert.
 
+### Function region
+
+`vercel.json` pins `regions: ["dub1"]` (Dublin). This is **not cosmetic** and
+must not be dropped: the Supabase project lives in `eu-west-1`, which is the
+same physical region. Vercel's default is `iad1` (Washington DC), and running
+there put every database query and every `getUser()` on a transatlantic round
+trip — about 80ms each, before Postgres did any work.
+
+That cost is paid per round trip, not per request, so it multiplied: a single
+page render makes several, and one cron pass makes hundreds. It was the
+dominant term in both page load time and how many users fit inside the cron's
+60-second budget.
+
+The rule is simply that the functions live wherever the database lives. If the
+Supabase project is ever moved, this moves with it.
+
 ### Scheduling
 
 `/api/cron/hourly` **must run every hour.** Each run serves only the users whose

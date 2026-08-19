@@ -32,6 +32,12 @@ export async function middleware(request: NextRequest) {
   );
 
   // Refresh the session if expired — required for Server Components.
+  //
+  // `getUser()` is a network call to Supabase Auth on every request that
+  // reaches here, not a local token decode. That is the reason `/api` is
+  // excluded at the matcher below rather than being listed as public: an API
+  // call used to pay for this hop *and* the identical one the route handler
+  // makes for itself.
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -43,23 +49,9 @@ export async function middleware(request: NextRequest) {
     path === "/preview" ||
     path === "/privacy" ||
     path === "/terms" ||
-    path.startsWith("/auth") ||
-    path.startsWith("/api/cron") ||
-    // The OAuth return legs from github.com and supabase.com. They must reach
-    // their route handlers even if the session looks stale here, because
-    // redirecting instead discards the one-time ?code= and leaks it into the
-    // /login URL. Both routes still call getUser() themselves, so access is not
-    // widened — and the gh_oauth_state / sb_oauth_state cookies are what
-    // actually guard them against CSRF.
-    path === "/api/integrations/github/callback" ||
-    path === "/api/integrations/supabase/callback" ||
-    // Stripe carries no session cookie, so the billing webhook cannot sit
-    // behind the session gate: without this the POST is redirected to /login,
-    // Stripe records the 307 as a successful delivery, and no subscription ever
-    // activates. The route is not unprotected — its Stripe signature check
-    // replaces the session as the authorisation boundary, which is exactly why
-    // that check must never be relaxed. See app/api/billing/webhook/route.ts.
-    path === "/api/billing/webhook";
+    // /auth/callback must reach its handler to exchange the one-time ?code=;
+    // redirecting instead discards it and leaks it into the /login URL.
+    path.startsWith("/auth");
 
   if (!user && !isPublic && !path.startsWith("/_next")) {
     const url = request.nextUrl.clone();
@@ -74,6 +66,30 @@ export async function middleware(request: NextRequest) {
   return response;
 }
 
+/**
+ * `api` is excluded, and that is a deliberate change of boundary rather than a
+ * relaxation.
+ *
+ * All eighteen route handlers under /api already authenticate themselves —
+ * sixteen with their own `getUser()`, plus `CRON_SECRET` on the cron and the
+ * Stripe signature on the billing webhook. Middleware was therefore making a
+ * second, redundant network round trip to Supabase Auth on every API call and
+ * enforcing nothing that the route did not enforce again a moment later.
+ *
+ * Two things improve by dropping it, beyond the latency:
+ *
+ *  - An unauthenticated API call now gets the route's own `401 {"error":…}`
+ *    instead of a `307` to /login. A redirect was always the wrong answer to
+ *    `fetch()`, which follows it and then chokes parsing an HTML sign-in page.
+ *  - The OAuth callbacks and the Stripe webhook no longer need naming here as
+ *    exceptions. They were only ever listed because the session gate would
+ *    otherwise have eaten a one-time `?code=` or a signed POST; each documents
+ *    its real authorisation boundary in its own file.
+ *
+ * The invariant this rests on: **every route under /api authenticates itself.**
+ * A new one that does not is public to the internet. There is no longer a
+ * blanket session check standing behind it.
+ */
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
 };

@@ -30,50 +30,71 @@ export default async function Home({
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return <Landing />;
 
-  const admin = createAdminClient();
-  const [{ data: settings }, { data: integrations }] = await Promise.all([
-    admin.from("user_settings").select("*").eq("user_id", user.id).maybeSingle(),
-    admin.from("integrations").select("provider").eq("user_id", user.id),
-  ]);
-
-  if (!integrations?.length) redirect("/onboarding");
-
   const requestedDate = /^\d{4}-\d{2}-\d{2}$/.test(searchParams.date ?? "")
     ? searchParams.date
     : undefined;
 
-  let query = admin
+  const admin = createAdminClient();
+
+  // One round trip, not three.
+  //
+  // These four reads used to run as three sequential awaits: settings +
+  // integrations, then the brief, then the two adjacent dates for the archive
+  // nav. Nothing forced that order except how it was written — the brief does
+  // not depend on the settings, and the neighbouring dates only needed the
+  // *date*, which the dates list below already carries.
+  //
+  // Sequential awaits are not free even now that the database is in the same
+  // region as the function: each one is a fresh HTTP request whose cost lands
+  // in full on a cold instance. Issuing them together makes the page wait for
+  // the slowest, rather than the sum.
+  const briefQuery = admin
     .from("briefs")
-    .select("content, brief_date")
+    .select("content")
     .eq("user_id", user.id)
     .order("brief_date", { ascending: false })
     .limit(1);
-  if (requestedDate) query = query.eq("brief_date", requestedDate);
-  const { data: briefRows } = await query;
+
+  const [{ data: settings }, { data: integrations }, { data: briefRows }, { data: dateRows }] =
+    await Promise.all([
+      // Only `timezone` is read below. `select("*")` also pulled the Stripe
+      // customer id and the tier into a page that has no use for either.
+      admin.from("user_settings").select("timezone").eq("user_id", user.id).maybeSingle(),
+      admin.from("integrations").select("provider").eq("user_id", user.id),
+      requestedDate ? briefQuery.eq("brief_date", requestedDate) : briefQuery,
+      // Every brief date this user has, newest first — one narrow indexed row
+      // per day, which is what makes replacing two queries with this a saving
+      // rather than a trade. The explicit limit is a guard against PostgREST's
+      // configurable row cap silently truncating the archive instead: ten
+      // years of daily briefs, well past anything reachable.
+      admin
+        .from("briefs")
+        .select("brief_date")
+        .eq("user_id", user.id)
+        .order("brief_date", { ascending: false })
+        .limit(3650),
+    ]);
+
+  // Deliberately after the fetch, not before. The redirect discards three
+  // queries when it fires, which costs nothing — they ran in parallel with the
+  // one that decides it, and this branch is only ever taken once per account.
+  if (!integrations?.length) redirect("/onboarding");
+
   const brief = (briefRows?.[0]?.content as Brief) ?? null;
 
-  // Adjacent brief dates for the archive nav
+  // Adjacent brief dates for the archive nav, read off the list rather than
+  // fetched. Newest-first ordering means the older neighbour is the *next*
+  // entry and the newer one is the previous — the same rows the old `.lt()`
+  // and `.gt()` queries returned.
   let prevDate: string | null = null;
   let nextDate: string | null = null;
   if (brief) {
-    const [{ data: prev }, { data: next }] = await Promise.all([
-      admin
-        .from("briefs")
-        .select("brief_date")
-        .eq("user_id", user.id)
-        .lt("brief_date", brief.brief_date)
-        .order("brief_date", { ascending: false })
-        .limit(1),
-      admin
-        .from("briefs")
-        .select("brief_date")
-        .eq("user_id", user.id)
-        .gt("brief_date", brief.brief_date)
-        .order("brief_date", { ascending: true })
-        .limit(1),
-    ]);
-    prevDate = prev?.[0]?.brief_date ?? null;
-    nextDate = next?.[0]?.brief_date ?? null;
+    const dates = (dateRows ?? []).map((d) => d.brief_date as string);
+    const i = dates.indexOf(brief.brief_date);
+    if (i !== -1) {
+      prevDate = dates[i + 1] ?? null;
+      nextDate = dates[i - 1] ?? null;
+    }
   }
 
   const tz = settings?.timezone ?? "UTC";

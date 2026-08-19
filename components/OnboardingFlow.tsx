@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useGoToBrief } from "@/lib/use-go-to-brief";
 
 type Repo = { full_name: string; private: boolean; pushed_at: string };
 type Table = { table: string; timestamp_columns: string[] };
@@ -35,6 +36,7 @@ export function OnboardingFlow({
   locked: Record<"github" | "supabase" | "stripe" | "plausible", boolean>;
 }) {
   const router = useRouter();
+  const goToBrief = useGoToBrief();
   const [reposSaved, setReposSaved] = useState(githubRepos.length > 0);
   const [sbSaved, setSbSaved] = useState(supabaseConnected);
   const [plSaved, setPlSaved] = useState(plausibleConnected);
@@ -77,8 +79,7 @@ export function OnboardingFlow({
       // Land on the brief that was produced, not on whatever has the newest
       // date — when yesterday was empty this will be an older active day.
       const date = (await res.json())?.brief?.brief_date;
-      router.push(date ? `/?date=${date}` : "/");
-      router.refresh();
+      goToBrief(date ? `/?date=${date}` : "/");
     } else {
       setGenerating(false);
       setGenError((await res.json()).error ?? "Something went wrong.");

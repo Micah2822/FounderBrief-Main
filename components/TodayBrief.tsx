@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useGoToBrief } from "@/lib/use-go-to-brief";
 
 /**
  * Asks for the day in progress rather than yesterday.
@@ -15,7 +15,7 @@ import { useRouter } from "next/navigation";
 export function TodayBrief({ partial = false }: { partial?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
+  const goToBrief = useGoToBrief();
 
   async function generate() {
     setBusy(true);
@@ -31,8 +31,7 @@ export function TodayBrief({ partial = false }: { partial?: boolean }) {
       setError(body?.error ?? "Couldn't read today.");
       return;
     }
-    if (body?.brief?.brief_date) router.push(`/?date=${body.brief.brief_date}`);
-    router.refresh();
+    goToBrief(body?.brief?.brief_date ? `/?date=${body.brief.brief_date}` : null);
   }
 
   return (
