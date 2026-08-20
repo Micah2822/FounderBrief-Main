@@ -596,6 +596,95 @@ Deployments list stays empty rather than showing a failure. If you ever move
 back to Hobby, see ARCHITECTURE › Footguns for the constants that must change
 together.
 
+## Testing and verification
+
+No test framework — the checks below are the whole suite. Run the first three
+before every push; the rest after a deploy that touches the brief schedule.
+
+### Before pushing
+
+```bash
+npx tsc --noEmit && npm run check && npm run build
+```
+
+`npm run check` is two guards that exist because the mistakes they catch are
+silent and security-relevant:
+
+| Check | Fails when |
+|---|---|
+| `check:scoping` | a service-role query has no `user_id` filter — it bypasses RLS, so an unscoped read returns *every tenant's* rows |
+| `check:api-auth` | a route under `/api` has no auth of its own. Middleware does not run there, so a handler that forgets `getUser()` is public |
+
+Both take documented exemptions rather than silent passes. If either fails, read
+the reason it prints before adding an exemption.
+
+### Triggering the brief run by hand
+
+You do not have to wait for the hour.
+
+**From the GitHub UI** — this runs the full drain loop exactly as the schedule
+does:
+
+1. Open the repo on GitHub → **Actions** tab
+2. In the left sidebar, click **Hourly brief tick**
+3. Click **Run workflow** (top right) → leave the branch as `main` → **Run
+   workflow**
+4. Refresh, click into the run, and open the *Drain the brief queue* step
+
+You are looking for one line per pass and a clean exit:
+
+```
+pass 1: attempted=3 deferred=0
+queue drained after 1 pass(es)
+```
+
+`deferred=0` means everyone due was served. A non-zero `deferred` on the last
+pass is a capacity signal, not an error — see ARCHITECTURE › Scheduling.
+
+> The **Run workflow** button only appears when the workflow file is on the
+> default branch. If it is missing, `hourly-brief.yml` has not reached `main`.
+
+**From a terminal**, if you would rather not use the UI:
+
+```bash
+curl -sS -H "Authorization: Bearer $CRON_SECRET" https://www.fndrbrief.com/api/cron/hourly | jq '{due, attempted, deferred}'
+```
+
+Do not print the whole body — it lists user IDs. `jq` the fields you want.
+
+### Will running it send real emails?
+
+Usually not, but check before you fire it at production. The run only emails a
+user whose local time has reached their `send_hour` and whose brief for
+yesterday is not already stored and sent. Outside that window it is a no-op and
+returns `attempted: 0`.
+
+To be sure, look at the response *before* worrying: `attempted: 0` means nothing
+was generated and nothing was sent.
+
+### Smoke tests after a schedule change
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" https://www.fndrbrief.com/api/cron/hourly
+```
+
+Must be `401`. This is the one that matters most — the endpoint is public in
+the sense that anyone can reach it, and `CRON_SECRET` is the only thing
+standing in front of a full brief run.
+
+Then confirm **Vercel → Settings → Cron Jobs** lists the hourly entry. A cron
+that is silently absent is the failure mode that leaves the Deployments list
+looking normal while no brief is ever sent.
+
+### What is deliberately not tested
+
+There is no unit or integration suite, and adding one is not free: the pipeline
+is mostly I/O against five third-party APIs, so meaningful tests need fixtures
+that go stale. The compensating controls are the two `npm run check` guards, the
+deterministic engine being pure (`lib/brief/diff.ts` — the only place numbers
+originate), and the fact that the LLM cannot introduce a figure that is not in
+the allowlist. If you add a test framework, start there.
+
 ## Architecture notes
 
 - **`lib/brief/diff.ts`** — the deterministic engine. Ledger rows, streaks,

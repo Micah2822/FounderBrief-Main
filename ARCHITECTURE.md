@@ -75,6 +75,8 @@ Next.js 14 App Router · React 18 · TypeScript · Tailwind · Supabase
 
 No test framework, no ESLint config, no state library. The automated checks are
 `npx tsc --noEmit` and `npm run check` (scoping + API auth; see Auth and security).
+How to run them, trigger a brief run by hand, and smoke-test a schedule change:
+README › [Testing and verification](README.md#testing-and-verification).
 
 ### Environment variables
 
