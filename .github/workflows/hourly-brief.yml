@@ -1,35 +1,89 @@
 name: Hourly brief tick
 
-# Vercel Hobby allows only one cron per day, but /api/cron/hourly must run
-# every hour: each run serves whichever timezones have just reached their
-# users' send hour (lib/../cron/hourly/route.ts skips everyone else).
-# The endpoint is idempotent per (user, day), so extra runs are harmless.
+# The real brief schedule. `vercel.json` also fires this endpoint hourly and is
+# the more reliable trigger — GitHub's scheduler is best-effort and can run
+# late or be skipped under load. What this workflow adds is the part a Vercel
+# cron cannot do: it calls the endpoint **repeatedly until the queue is empty**.
+#
+# One invocation stops taking new users at its start deadline and reports how
+# many were left as `deferred` (see app/api/cron/hourly/route.ts). A single
+# call therefore serves a bounded number of users; the loop below is what turns
+# "the rest wait for the next hour" into "the rest wait about a minute".
+#
+# The loop lives here rather than in the function on purpose. A function that
+# re-invokes itself to continue its own queue has one catastrophic failure
+# mode — if its stop condition is ever wrong it fans out forever, and the way
+# you find out is the bill. `seq` cannot do that.
 
 on:
   schedule:
     - cron: "0 * * * *"
   workflow_dispatch: # lets you trigger a run by hand from the Actions tab
 
+# One drain at a time. Without this a slow run and the next hour's trigger can
+# overlap and process the same users twice — idempotency makes that harmless
+# but not free, since it is LLM calls. `cancel-in-progress: false` queues at
+# most one follow-up rather than letting runs pile up.
+concurrency:
+  group: hourly-brief
+  cancel-in-progress: false
+
 jobs:
   tick:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Worst case is MAX_PASSES × the function's own ceiling. Realistically a
+    # pass is well under a minute and the loop exits after one or two.
+    timeout-minutes: 45
     steps:
-      - name: Call /api/cron/hourly
+      - name: Drain the brief queue
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ENDPOINT: https://www.fndrbrief.com/api/cron/hourly
+          # 12 passes covers a few thousand users in one timezone-hour. Past
+          # that the answer is a queue, not a longer loop — POST_MVP › Stage 3.
+          MAX_PASSES: 12
         run: |
-          status=$(curl -sS --max-time 120 \
-            -o /tmp/response.json -w '%{http_code}' \
-            -H "Authorization: Bearer $CRON_SECRET" \
-            https://www.fndrbrief.com/api/cron/hourly)
+          set -uo pipefail
 
-          # This repo is public, so Actions logs are public. A 200 body lists
-          # user IDs — never echo it. Error bodies are generic, so they're safe.
-          if [ "$status" = "200" ]; then
-            echo "ok"
-          else
-            echo "::error::cron endpoint returned $status"
-            cat /tmp/response.json
-            exit 1
-          fi
+          for pass in $(seq 1 "$MAX_PASSES"); do
+            # Delete last pass's body BEFORE the call, not after. On a
+            # transport failure (timeout, DNS) curl writes nothing and the
+            # previous file survives — so the error branch below would `cat` a
+            # stale **200** body, and a 200 body lists user IDs. In a public
+            # repo's logs. One line, and it is the whole reason the error
+            # branch is safe to print at all.
+            rm -f /tmp/response.json
+
+            # --max-time must exceed the function's maxDuration (300s), or curl
+            # gives up on a run that was about to succeed and the pass is
+            # recorded as a failure.
+            status=$(curl -sS --max-time 330 \
+              -o /tmp/response.json -w '%{http_code}' \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              "$ENDPOINT") || status="000"
+
+            if [ "$status" != "200" ]; then
+              echo "::error::cron endpoint returned $status on pass $pass"
+              # Safe to print: error bodies are generic strings. A 200 body is
+              # NOT — see the note below.
+              cat /tmp/response.json 2>/dev/null || echo "(no response body)"
+              exit 1
+            fi
+
+            # This repo is public, so Actions logs are public, and a 200 body
+            # lists user IDs. Only ever echo values parsed out of it — never
+            # the body itself. See ARCHITECTURE › Scheduling.
+            attempted=$(jq -r '.attempted // 0' /tmp/response.json)
+            deferred=$(jq -r '.deferred // 0' /tmp/response.json)
+            echo "pass $pass: attempted=$attempted deferred=$deferred"
+
+            if [ "$deferred" = "0" ]; then
+              echo "queue drained after $pass pass(es)"
+              exit 0
+            fi
+          done
+
+          # Not a failure: every user still gets their brief, just later, and
+          # the next hourly tick continues. It does mean one hour no longer
+          # fits the load — raise CRON_CONCURRENCY, then see POST_MVP › Stage 3.
+          echo "::warning::still deferring users after $MAX_PASSES passes — capacity is short"

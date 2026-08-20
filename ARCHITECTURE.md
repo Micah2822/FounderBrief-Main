@@ -74,7 +74,7 @@ Next.js 14 App Router · React 18 · TypeScript · Tailwind · Supabase
 (Postgres + Auth) · OpenAI · Resend · deployed on Vercel.
 
 No test framework, no ESLint config, no state library. The automated checks are
-`npx tsc --noEmit` and `npm run check:scoping` (see Auth and security).
+`npx tsc --noEmit` and `npm run check` (scoping + API auth; see Auth and security).
 
 ### Environment variables
 
@@ -90,6 +90,7 @@ No test framework, no ESLint config, no state library. The automated checks are
 | `GITHUB_APP_PRIVATE_KEY` | signs the RS256 JWT that mints installation tokens; PEM — quote it or escape the newlines, see footguns |
 | `SUPABASE_OAUTH_CLIENT_ID` / `_SECRET` | Management API OAuth — the **founder's** Supabase, not the app's |
 | `CRON_SECRET` | cron bearer token; **fails closed if unset** |
+| `CRON_CONCURRENCY` | users generated at once; optional, defaults to 10. Bounded by OpenAI's shared quota, not ours — see Scheduling |
 | `ALERT_EMAIL` | operator failure alerts; **unset = off**, and it is also the recipient |
 | `ENCRYPTION_KEY_OLD` | set **only during a key rotation**; see the runbook in `scripts/rotate-encryption-key.mjs` |
 | `STRIPE_BILLING_SECRET_KEY` | billing — **your** Stripe account. Restricted (`rk_`), four permissions; never `sk_` |
@@ -143,7 +144,7 @@ scripts/check-github-app.mjs  Validates GITHUB_APP_* and mints a test token
 supabase/migrations/          Sequential SQL, applied by hand
 .github/workflows/            hourly-brief.yml — the real brief schedule (see below)
 middleware.ts                 Session refresh + route gating
-vercel.json                   Daily cron (Hobby-plan placeholder, not the real tick)
+vercel.json                   dub1 region pin + hourly cron (one of two triggers)
 ```
 
 ---
@@ -264,30 +265,102 @@ Supabase project is ever moved, this moves with it.
 
 ### Scheduling
 
-`/api/cron/hourly` **must run every hour.** Each run serves only the users whose
-local time has just reached their `send_hour` and skips everyone else, so a less
-frequent schedule silently drops entire timezones — no error, just users who
-never receive anything. The endpoint is idempotent per (user, day), so extra
-runs are harmless.
+`/api/cron/hourly` **should run every hour.** Each run serves the users whose
+local time has *reached or passed* their `send_hour` and who have not had
+yesterday's brief yet. The endpoint is idempotent per (user, day), so extra runs
+are harmless.
 
-Vercel's Hobby plan allows only one cron per day, and a `vercel.json` declaring
-an hourly schedule is **rejected at config validation** — before a build record
-exists, so the Deployments list stays empty rather than showing a failure. Hence
-the split:
+That eligibility rule is `>=`, not `==`, and the difference is the whole
+reliability story. Under exact-hour matching a single missed or late tick lost
+that user their brief for the day, permanently and silently — the next hour no
+longer matched them and nothing ever looked back. GitHub Actions schedules are
+best-effort and are routinely delayed past the hour under load, so a delayed run
+skipped an entire timezone's cohort.
+
+With a window, "already done" is decided by the stored brief rather than by the
+clock, so a missed hour is retried by the next one and the failure mode is
+**late instead of never**. The window closes on its own at local midnight, when
+the hour drops below `send_hour` and the target date moves on.
+
+A run is also bounded: it stops *starting* new users at `START_DEADLINE_MS` and
+returns normally, reporting a `deferred` count, rather than being killed
+mid-user at `maxDuration` with no alert and no response. Users it did not reach
+are the most overdue on the next pass, so nothing is starved by its position in
+the table.
+
+Deferral is normal and self-healing — the drain loop below exists to absorb it.
+What is *not* normal is the loop still deferring after `MAX_PASSES`, which is
+the signal that one hour genuinely no longer fits the load. `ALERT_EMAIL` gets
+a "briefs deferred, out of capacity" mail on any run that defers, so this
+surfaces before a founder notices a late brief.
+
+#### The two triggers, and why both
 
 | Source | Schedule | Role |
 |---|---|---|
-| `vercel.json` | `0 6 * * *` | Within the Hobby limit. Duplicate, harmless |
-| `.github/workflows/hourly-brief.yml` | `0 * * * *` | **The real tick.** curls the production URL with `CRON_SECRET` |
+| `vercel.json` | `0 * * * *` | **Reliability.** Vercel's own scheduler; fires on time. One call, so it serves one pass |
+| `.github/workflows/hourly-brief.yml` | `0 * * * *` | **Completeness.** Calls the endpoint *repeatedly until `deferred` is 0* |
+
+Neither is redundant. A Vercel cron is the more dependable trigger — GitHub's
+scheduler is best-effort and can run late or be skipped entirely under load —
+but it fires once, so on its own it serves one pass and leaves the rest for the
+next hour. The workflow is the opposite: less reliable as a clock, but it is
+what drains the queue in one go. Running both means a missed GitHub run still
+gets a pass in, and a busy hour still finishes.
+
+They overlap harmlessly. The endpoint is idempotent per (user, day), and the
+`dropCompleted` pre-filter means a second caller finds nothing to do.
 
 The Action needs `CRON_SECRET` under repo → Settings → Secrets → **Actions**,
-matching Vercel exactly, or the endpoint 401s. On Vercel Pro, set `vercel.json`
-to `0 * * * *` and delete the workflow.
+matching Vercel exactly, or the endpoint 401s.
 
-Two constraints that live in the workflow and are easy to undo by accident:
-the production host is **hardcoded** there, so a domain change must be mirrored;
-and because the repo is public its Actions logs are public, so a `200` body —
-which lists user IDs — must never be echoed.
+#### The drain loop
+
+One invocation is bounded, so one call cannot be assumed to finish the hour.
+The workflow calls the endpoint again while `deferred > 0`, up to `MAX_PASSES`.
+That is what turns "the rest wait an hour" into "the rest wait about a minute".
+
+**The loop is in the workflow and not in the function, deliberately.** A
+function that re-invokes itself to continue its own queue has one catastrophic
+failure mode: if its stop condition is ever wrong it fans out forever, in
+parallel, and the way you find out is the OpenAI bill. `seq 1 12` cannot do
+that, is visible in the run log, and needs no application code.
+
+Three constraints live in that workflow and are easy to undo by accident:
+
+- The production host is **hardcoded**, so a domain change must be mirrored.
+- The repo is public, so its Actions logs are public, and a `200` body lists
+  user IDs — **never echo it**. Only values parsed out with `jq`.
+- The response file is deleted *before* each call. On a transport failure curl
+  writes nothing, so without that the error branch prints the previous pass's
+  **200** body — user IDs and all — into a public log.
+
+#### What that costs in wall time
+
+Per pass: `CONCURRENCY` (10) users at a time until `START_DEADLINE_MS` (225s),
+so ~190 users per pass at a realistic 12s each.
+
+| Biggest cohort | Passes | Everyone served within |
+|---|---|---|
+| 10 | 1 | ~1 min |
+| 100 | 1 | ~3 min |
+| 200 | 2 | ~5 min |
+| 500 | 3 | ~11 min |
+| 1,000 | 6 | ~21 min |
+| 2,000 | 11 | ~41 min |
+
+"Cohort" is what matters, not total users: only people sharing **both** a
+timezone and a `send_hour` compete for the same hour. `MAX_PASSES = 12` covers
+a cohort of roughly 2,300 before the loop gives up and warns.
+
+The governing limit on `CONCURRENCY` is **OpenAI, not us**. Every other quota
+is per-user — GitHub's is per installation, Stripe and Plausible keys belong to
+individual founders — but the OpenAI quota is shared across the whole run. At
+10 concurrent, roughly 50 users/minute × ~4k tokens sits near the 200k TPM of
+OpenAI's tier 1. Raising `CRON_CONCURRENCY` past that earns 429s, and the
+symptom is soft rather than loud: `polishWithLLM` gives up and ships the
+deterministic baseline, so briefs still arrive, just unpolished. Check the tier
+before raising it.
 
 ### Partial briefs
 
@@ -976,9 +1049,14 @@ never runs, no row is written, and the only symptom is a Connect button that
 never changes — with nothing in the logs, because no request reached the server.
 README section 2 has the setting.
 
-**`maxDuration = 60` and sequential users.** The cron processes users in a `for`
-loop, each costing ~6–12 external API calls. See POST_MVP.md Stage 3 — batch
-with `Promise.allSettled` first, then move to a queue.
+**The cron's three time constants are one budget, not three settings.**
+`START_DEADLINE_MS` (225s) + `USER_TIMEOUT_MS` (60s) + the alert send must stay
+under `maxDuration` (300s), because the worst case is a user started a
+millisecond before the deadline that then hangs. Raising the deadline without
+lowering the timeout reintroduces the exact failure they were written to
+prevent — killed mid-run, no alert, no response, silent missing briefs. If the
+plan ever drops back to Hobby, `maxDuration` must return to 60 and the other
+two must come down with it.
 
 **GitHub disables scheduled workflows after 60 days of repo inactivity.** Since
 that workflow *is* the brief schedule, a quiet stretch stops every user's 7am

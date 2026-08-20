@@ -551,28 +551,50 @@ npm run dev
    or `www` and redirect the other to it. A mismatch fails at the redirect,
    which looks like a connector that silently refuses to connect.
 
-**Scheduling the brief.** `/api/cron/hourly` must run every hour: each run
-serves only the users whose local time has just reached their send hour
-(`app/api/cron/hourly/route.ts`), so a less frequent schedule silently skips
-every other timezone — no error, just users who never receive anything.
+**Scheduling the brief.** `/api/cron/hourly` runs every hour. Each run serves
+the users whose local time has *reached or passed* their send hour and who have
+not had yesterday's brief yet (`app/api/cron/hourly/route.ts`). Because that is
+a window rather than an exact-hour match, a late or missed run is picked up by
+the next one — the failure mode is a late brief, never a missing one.
 
-Vercel's **Hobby plan allows only one cron per day**, and a deployment whose
-`vercel.json` declares an hourly schedule is rejected at config validation —
-it fails *before* a build record is created, so the Deployments list stays
-empty rather than showing a failure. Hence the split:
+There are **two triggers, and you need both**:
 
-- `vercel.json` — daily at 06:00 UTC, within the Hobby limit. Harmless
-  duplicate work; the endpoint is idempotent per (user, day).
-- `.github/workflows/hourly-brief.yml` — the real hourly tick, free. Add
-  `CRON_SECRET` under repo → Settings → Secrets and variables → **Actions**,
-  matching the Vercel value exactly, or the endpoint returns 401. Trigger a
-  test run from the Actions tab (`workflow_dispatch`) rather than waiting.
+- `vercel.json` — hourly, Vercel's own scheduler. The dependable clock: it
+  fires on time. It calls the endpoint once, so it serves one pass.
+- `.github/workflows/hourly-brief.yml` — hourly, and it calls the endpoint
+  *repeatedly until nothing is left deferred*. This is what finishes a busy
+  hour in minutes instead of hours. Less reliable as a clock (GitHub's
+  scheduler is best-effort and can run late or be skipped), which is exactly
+  why the Vercel cron is still there.
 
-  GitHub disables scheduled workflows after 60 days of repo inactivity (any
-  commit re-enables them), and the schedule is best-effort, so runs can land a
-  few minutes late.
+  Add `CRON_SECRET` under repo → Settings → Secrets and variables →
+  **Actions**, matching the Vercel value exactly, or the endpoint returns 401.
+  Trigger a test run from the Actions tab (`workflow_dispatch`) rather than
+  waiting for the hour.
 
-On Vercel Pro, set `vercel.json` back to `0 * * * *` and delete the workflow.
+  GitHub also disables scheduled workflows after 60 days of repo inactivity;
+  any commit re-enables them.
+
+Running both is safe: the endpoint is idempotent per (user, day), so a second
+caller in the same hour finds nothing to do.
+
+**Capacity.** One pass handles ~190 users; the drain loop repeats up to 12
+times. What competes for an hour is a *cohort* — users sharing both a timezone
+and a send hour — not your total user count. A 100-user cohort is served within
+about 3 minutes of its send hour, 500 within about 11. Past a ~2,000 cohort the
+loop warns instead of finishing, and the answer is a queue (POST_MVP → Stage 3).
+
+`CRON_CONCURRENCY` (default 10) tunes this, but it is bounded by **OpenAI's**
+shared rate limit rather than anything here — raise it only after checking your
+tier, or briefs quietly downgrade to the deterministic baseline.
+
+**These settings assume Vercel Pro.** `maxDuration = 300` and the hourly
+`vercel.json` cron both exceed Hobby limits: Hobby caps functions at 60s and
+allows one cron per day, and a `vercel.json` declaring an hourly schedule is
+rejected at config validation *before* a build record exists — so the
+Deployments list stays empty rather than showing a failure. If you ever move
+back to Hobby, see ARCHITECTURE › Footguns for the constants that must change
+together.
 
 ## Architecture notes
 

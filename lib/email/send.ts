@@ -136,7 +136,15 @@ export async function sendOrphanedCustomerAlert(
 export async function sendCronAlertEmail(
   stageCounts: Record<string, number>,
   affectedUserIds: string[],
-  totalProcessed: number
+  totalProcessed: number,
+  /**
+   * Users who were due but never started, because the run hit its start
+   * deadline. Not a failure — the next tick takes them first — but it is the
+   * signal that one hour no longer fits the load, and it arrives before
+   * anyone notices a late brief. A count only: the ids are in the response
+   * body and the logs, and this email deliberately stays a summary.
+   */
+  deferred = 0
 ): Promise<boolean> {
   const to = process.env.ALERT_EMAIL;
   if (!to || !process.env.RESEND_API_KEY) return false;
@@ -146,13 +154,30 @@ export async function sendCronAlertEmail(
     .map(([stage, n]) => `${stage.padEnd(16)} ${n}`)
     .join("\n");
 
+  // A run can defer without failing anything, so the subject has to be able
+  // to say so rather than reading "0 of N briefs failed" and looking like a
+  // false alarm.
+  const subject = failed
+    ? `Founder Brief — ${failed} of ${totalProcessed} briefs failed`
+    : `Founder Brief — ${deferred} briefs deferred, out of capacity`;
+
+  const deferredNote = deferred
+    ? `\n\n${deferred} user(s) were due but not started before the run's ` +
+      `deadline. They are first in line next hour. If this is not zero every ` +
+      `hour, one tick no longer fits the load — raise CRON_CONCURRENCY, or ` +
+      `maxDuration on a paid plan.`
+    : "";
+
   const { Resend } = await import("resend");
   const resend = new Resend(process.env.RESEND_API_KEY);
   const { error } = await resend.emails.send({
     from: process.env.EMAIL_FROM || "Founder Brief <onboarding@resend.dev>",
     to,
-    subject: `Founder Brief — ${failed} of ${totalProcessed} briefs failed`,
-    text: `${stages}\n\nAffected user ids:\n${affectedUserIds.join("\n")}\n\nDetail is in the Vercel logs for this run.`,
+    subject,
+    text:
+      `${stages || "(no failures)"}\n\nAffected user ids:\n` +
+      `${affectedUserIds.join("\n") || "(none)"}` +
+      `${deferredNote}\n\nDetail is in the Vercel logs for this run.`,
   });
   if (error) {
     console.error("resend alert error", error);

@@ -32,9 +32,13 @@ metadata all work identically. The gain is that Actions logs stop being public,
 which retires the standing footgun that the cron's `200` body lists user IDs and
 must never be echoed. The cost is that **GitHub Actions minutes are unlimited on
 public repos but metered on private ones** (2,000/month on the free tier), and
-`hourly-brief.yml` is the real brief schedule — roughly 24 short runs a day. That
-should sit inside the free allowance, but it stops being free-by-default, so
-check the actual per-run duration in the Actions tab before assuming. If it ever
+`hourly-brief.yml` is one of the two brief triggers — 24 runs a day, each
+looping until the queue drains, so a run is longer than a single curl and grows
+with your biggest cohort. That should still sit inside the free allowance, but
+it stops being free-by-default, so check the actual per-run duration in the
+Actions tab before assuming. (Going private would also retire the
+public-Actions-logs footgun entirely, since that is the only reason the
+workflow may never echo a 200 body.) If it ever
 gets tight, the fix is not a longer interval — that silently skips timezones
 (see ARCHITECTURE › Scheduling) — but moving the tick to a cheaper trigger.
 
@@ -231,23 +235,30 @@ Revisit **only** when paying users ask:
 
 ## Stage 3 — Scale (1,000+ users)
 
-**Trigger: cron duration creeping toward the 300s cap, or >2k users, or the
-first "my brief was late" complaint.**
+**Trigger: the drain loop warning "still deferring after 12 passes", a cohort
+above ~2k, or the first "my brief was late" complaint.**
 
 ### The bottleneck you hit first: the hourly cron
 
-`/api/cron/hourly` processes users **sequentially** in one invocation
-(`maxDuration: 300`). Each user = ~6–12 external API calls. Envelope math:
-~1.5–3s per user → **the cron falls over somewhere between 100 and 200 users
-in a single timezone hour.** This is the first real scaling fix:
+**Step 1 of this is done** — the cron no longer processes users sequentially.
+It runs `CRON_CONCURRENCY` (10) at a time until a 225s start deadline, reports
+whatever it did not reach as `deferred`, and the workflow's drain loop calls
+straight back until that count is zero. See ARCHITECTURE › Scheduling for the
+wall-time table. That covers a **~2,000-user cohort**, where "cohort" is users
+sharing both a timezone and a send hour.
 
-1. **Now (free):** batch users with `Promise.allSettled` in groups of ~10
-   inside the existing cron. Buys 5–10×. One-file change.
+What is left, in the order it becomes necessary:
+
+1. **Raise `CRON_CONCURRENCY`** — but check the OpenAI tier first. It is the
+   only shared quota in the run (~200k TPM on tier 1 is roughly what 10
+   concurrent users consume); every other limit is per-user. Too high shows up
+   as 429s and briefs silently downgrading to the deterministic baseline, not
+   as an error.
 2. **Then (queue):** cron becomes a *dispatcher* that enqueues one job per
    user — Supabase Queues / pgmq, or Upstash QStash, or Inngest. Workers
    process per-user jobs with retries + per-job timeouts. A failed user no
-   longer delays anyone else's 7am. This is the architecture end-state;
-   everything else below is tuning.
+   longer delays anyone else's 7am. This is the architecture end-state, and the
+   trigger for it is the drain loop still warning after `MAX_PASSES`.
 3. **Per-provider token buckets:** GitHub search API is 30 req/min per token —
    at scale, stagger collection across the whole hour instead of the top of it
    (collect at :00–:50, generate at :50, send at send_hour exactly).

@@ -24,6 +24,11 @@ const ALLOWED = [
     why: "the cron's whole job is to walk every onboarded user; selects no tenant data beyond scheduling fields",
   },
   {
+    file: "app/api/cron/hourly/route.ts",
+    table: "briefs",
+    why: "the pre-filter that drops users whose brief is already finished. Spans tenants for the same reason the user_settings select above does — the cron walks everyone — and is keyed by brief_date because there are at most three distinct ones, where a user_id list would be every user. Reads no brief CONTENT, only (user_id, brief_date, emailed_at, partial), and the result is used solely to decide who to skip: nothing crosses into another tenant's brief or prompt. It is also purely an optimisation — processUser re-reads its own row scoped by user_id — so removing it changes speed, not correctness.",
+  },
+  {
     file: "app/api/billing/webhook/route.ts",
     table: "user_settings",
     why: "Stripe events carry no user_id, so the tenant is resolved by stripe_customer_id — a real tenant filter only because migration 0004 puts a unique index on that column. If that index is ever dropped, this exemption stops being true.",
@@ -55,7 +60,17 @@ for (const path of files) {
     // The statement runs to the next `;` — builder chains and upsert argument
     // objects both terminate there, and neither contains one internally.
     const end = src.indexOf(";", m.index);
-    const stmt = src.slice(m.index, end === -1 ? src.length : end);
+    let stmt = src.slice(m.index, end === -1 ? src.length : end);
+
+    // Strip the argument to `.select(...)` before looking for the filter.
+    //
+    // A column list is not a tenant filter, but it is the most likely place
+    // for the string "user_id" to appear — so `.select("user_id, brief_date")`
+    // with no `.eq()` anywhere used to satisfy this check while reading every
+    // tenant's rows. That is precisely the bug this script exists to catch,
+    // and it was passing it.
+    stmt = stmt.replace(/\.select\(\s*(["'`])[\s\S]*?\1/g, ".select(");
+
     if (stmt.includes("user_id")) continue;
 
     const line = src.slice(0, m.index).split("\n").length;
