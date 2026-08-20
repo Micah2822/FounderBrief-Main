@@ -233,6 +233,44 @@ Revisit **only** when paying users ask:
 
 ---
 
+## Deferred: the Next.js major upgrade
+
+**Trigger: after launch, as its own change with nothing else in it.**
+
+`next@14.2.35` is the **last** 14.x release, so the remaining advisories are not
+going to be fixed in place — they need 15.x or 16.x. `npm audit` reports two
+high-severity items: `next` itself, and a `postcss@8.4.31` nested inside it
+(the top-level `postcss` and `nanoid` are already patched, via a plain
+`npm audit fix` that changed nothing else).
+
+Both were left deliberately, because every remaining advisory was checked
+against this codebase and none reaches it:
+
+| Advisory | Why it does not apply |
+|---|---|
+| Server Actions DoS / SSRF / unbounded payload / internal endpoint disclosure | no `"use server"` anywhere — the app posts to route handlers |
+| SSRF via rewrites | no `rewrites` in `next.config.mjs` |
+| Middleware bypass, Pages Router + i18n | App Router, no i18n |
+| SSRF on custom servers | no custom server; deployed on Vercel |
+| CVE-2025-29927 (middleware auth bypass) | patched in 14.2.25; also never exploitable here, since every page and route calls `getUser()` itself rather than trusting middleware |
+| `postcss` sourceMappingURL / arbitrary `.map` read | build-time only, and it processes our own CSS — never attacker-supplied |
+
+So this is maintenance, not exposure, and it is the wrong thing to do in the
+same week as a launch. When you do it, the migration surface is small and
+already known — Next 15 makes these async:
+
+- `cookies()` — `lib/supabase/server.ts`, `api/integrations/supabase/route.ts`,
+  `api/integrations/supabase/callback/route.ts`,
+  `api/integrations/github/callback/route.ts`
+- `searchParams` becomes a Promise — `app/page.tsx`, `app/settings/page.tsx`,
+  `app/onboarding/page.tsx`
+
+Seven files. Do it on a branch, run `npx tsc --noEmit && npm run check && npm
+run build`, and walk the sign-in and connector flows before merging — those are
+the paths that touch `cookies()`.
+
+---
+
 ## Stage 3 — Scale (1,000+ users)
 
 **Trigger: the drain loop warning "still deferring after 12 passes", a cohort
