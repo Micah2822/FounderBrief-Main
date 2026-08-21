@@ -39,7 +39,7 @@ export function Landing() {
             Get your morning brief
           </Link>
           <span className="font-mono text-[12px] text-faint">
-            Free while in beta · 2-minute setup
+            2-minute setup
           </span>
         </div>
       </section>
