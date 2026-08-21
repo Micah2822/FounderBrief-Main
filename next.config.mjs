@@ -66,10 +66,15 @@ const csp = [
   // package and is bundled into our own JS, so nothing is fetched from
   // cdn.mxpnl.com at runtime; adding that CDN to script-src would have been a
   // far larger concession than this one host to send events to.
+  //
+  // This must stay in step with `api_host` in lib/analytics.ts. If they drift,
+  // the browser blocks every event and the only symptom is a CSP violation in
+  // the console — nothing surfaces in Mixpanel.
   [
     "connect-src 'self'",
     supabaseOrigin,
-    "https://api-js.mixpanel.com",
+    // EU residency project — see the api_host note in lib/analytics.ts.
+    "https://api-eu.mixpanel.com",
     dev ? "ws: http://localhost:*" : "",
   ]
     .filter(Boolean)

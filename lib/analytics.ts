@@ -75,6 +75,14 @@ export function initAnalytics() {
   started = true;
 
   mixpanel.init(TOKEN!, {
+    // The FndrBrief project has EU data residency, and EU projects ingest at
+    // api-eu.mixpanel.com. The SDK's default is the US host, which accepts
+    // the request and answers `{"error":null,"status":1}` — the edge does not
+    // check residency — and the events then never appear in the project. A
+    // silent, well-formed success that goes nowhere, so it cannot be caught by
+    // checking for errors. If this ever moves back to a US project, this line
+    // and the CSP `connect-src` entry in next.config.mjs must change together.
+    api_host: "https://api-eu.mixpanel.com",
     persistence: "localStorage",
     opt_out_tracking_by_default: true,
     opt_out_tracking_persistence_type: "localStorage",
