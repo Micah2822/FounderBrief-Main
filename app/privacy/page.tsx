@@ -77,18 +77,42 @@ export default function PrivacyPage() {
         </section>
 
         <section>
-          <p className="eyebrow mb-2">Cookies</p>
+          <p className="eyebrow mb-2">Cookies and local storage</p>
           <p className="text-muted">
-            Only the ones the site cannot work without, and no consent banner,
-            because there is nothing here to consent to. We set a session cookie
-            to keep you signed in, short-lived cookies during a connection flow
-            to verify the request came from you, and nothing else. There are no
-            advertising cookies, no analytics cookies, and no third-party
-            trackers on any page. All of them are marked{" "}
+            We set a session cookie to keep you signed in, and short-lived
+            cookies during a connection flow to verify the request came from
+            you. Both are marked{" "}
             <span className="font-mono text-[13px]">HttpOnly</span> and{" "}
             <span className="font-mono text-[13px]">Secure</span>, so they are
             unreadable to scripts and never sent over an unencrypted
             connection. Signing out clears them.
+          </p>
+          <p className="text-muted mt-4">
+            If you allow analytics, Mixpanel — a third-party analytics service —
+            stores an identifier in your browser&apos;s local storage so it can
+            tell that two events came from the same person. That is tracking,
+            and it is why we ask you first rather than assuming. What it never
+            includes: advertising, ad networks, or anything that follows you to
+            other websites.
+          </p>
+        </section>
+
+        <section>
+          <p className="eyebrow mb-2">Product analytics</p>
+          <p className="text-muted">
+            If you allow it, we record two things in Mixpanel: that an
+            account was created, and that a brief was generated. Each carries
+            the day it was for and which button produced it, and nothing else.
+            No page views, no clicks, no scrolling, no session recordings, and
+            never a word of what is in your brief or your connected accounts.
+            Your IP address is not sent, so we do not know and cannot learn
+            where you are reading from. The identifier tying those events
+            together is your account id, so it disappears when your account
+            does, and Mixpanel holds your email address so we can find your
+            account if you write to us. Declining is a real answer we remember,
+            not a delay before we ask again — and to change your mind either
+            way, clear this site&apos;s data in your browser and the banner
+            will ask again.
           </p>
         </section>
 
@@ -96,8 +120,9 @@ export default function PrivacyPage() {
           <p className="eyebrow mb-2">Third parties</p>
           <p className="text-muted">
             We use Supabase (authentication and storage), Vercel (hosting),
-            Resend (email delivery), and OpenAI (to phrase your brief and
-            answer questions). Only aggregate counts, commit subject lines and
+            Resend (email delivery), OpenAI (to phrase your brief and
+            answer questions), and — only with your consent — Mixpanel, for the
+            two product counts described above. Only aggregate counts, commit subject lines and
             PR titles are sent to OpenAI — never your credentials, never your
             source code, never your users&apos; data. We
             do not sell data or use it for advertising. Your data is used to

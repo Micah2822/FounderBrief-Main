@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useGoToBrief } from "@/lib/use-go-to-brief";
+import { trackBriefGenerated } from "@/lib/analytics";
 
 type Repo = { full_name: string; private: boolean; pushed_at: string };
 type Table = { table: string; timestamp_columns: string[] };
@@ -78,8 +79,9 @@ export function OnboardingFlow({
     if (res.ok) {
       // Land on the brief that was produced, not on whatever has the newest
       // date — when yesterday was empty this will be an older active day.
-      const date = (await res.json())?.brief?.brief_date;
-      goToBrief(date ? `/?date=${date}` : "/");
+      const brief = (await res.json().catch(() => null))?.brief;
+      trackBriefGenerated("onboarding", brief);
+      goToBrief(brief?.brief_date ? `/?date=${brief.brief_date}` : "/");
     } else {
       setGenerating(false);
       setGenError((await res.json()).error ?? "Something went wrong.");

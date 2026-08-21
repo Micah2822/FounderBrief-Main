@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useGoToBrief } from "@/lib/use-go-to-brief";
+import { trackBriefGenerated } from "@/lib/analytics";
 
 export function RefreshBrief() {
   const [busy, setBusy] = useState(false);
@@ -21,6 +22,7 @@ export function RefreshBrief() {
       setError(body?.error ?? "Couldn't refresh.");
       return;
     }
+    trackBriefGenerated("refresh", body?.brief);
     // Navigate to the brief that was actually produced. When yesterday was
     // empty the route falls forward to today, and the home page shows the
     // *newest* brief_date — so without this the founder could land back on the

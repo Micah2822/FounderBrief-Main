@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useGoToBrief } from "@/lib/use-go-to-brief";
+import { trackBriefGenerated } from "@/lib/analytics";
 
 /**
  * Asks for the day in progress rather than yesterday.
@@ -31,6 +32,7 @@ export function TodayBrief({ partial = false }: { partial?: boolean }) {
       setError(body?.error ?? "Couldn't read today.");
       return;
     }
+    trackBriefGenerated("today_so_far", body?.brief);
     goToBrief(body?.brief?.brief_date ? `/?date=${body.brief.brief_date}` : null);
   }
 

@@ -60,7 +60,18 @@ const csp = [
   "font-src 'self'",
   // Same-origin /api/*, plus Supabase Auth, which the browser client calls
   // directly for OTP sign-in. `ws:` is the dev HMR socket.
-  ["connect-src 'self'", supabaseOrigin, dev ? "ws: http://localhost:*" : ""]
+  //
+  // Mixpanel is the one analytics origin, and it is a `connect-src` entry
+  // only — no `script-src` change. The SDK comes from the `mixpanel-browser`
+  // package and is bundled into our own JS, so nothing is fetched from
+  // cdn.mxpnl.com at runtime; adding that CDN to script-src would have been a
+  // far larger concession than this one host to send events to.
+  [
+    "connect-src 'self'",
+    supabaseOrigin,
+    "https://api-js.mixpanel.com",
+    dev ? "ws: http://localhost:*" : "",
+  ]
     .filter(Boolean)
     .join(" "),
   "form-action 'self'",

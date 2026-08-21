@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Wordmark } from "@/components/Wordmark";
+import { identifyUser, track } from "@/lib/analytics";
 
 // Supabase's OTP length is a project setting, not a constant — it can be any
 // value from 6 to 10 digits, and this project currently issues 8. Do not
@@ -49,7 +50,7 @@ export default function LoginPage() {
     // not retry with another type on failure: a failed attempt can invalidate
     // the token, so a speculative second call turns a recoverable typo into a
     // dead code.
-    const { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
+    const { data, error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
 
     if (error) {
       setBusy(false);
@@ -59,6 +60,22 @@ export default function LoginPage() {
       // request a new code when the real cause was a typo.
       setError(`${error.message}. Check the code, or send a new one.`);
       return;
+    }
+
+    // One OTP flow serves both first-ever and returning sign-in — Supabase
+    // gives no "this is a new user" flag, so the two are told apart by the
+    // clock: on a first sign-in the row was created moments ago, on a
+    // returning one `created_at` is days or months old. The window is
+    // deliberately wide (a minute) because these are two separate server
+    // writes, and deliberately not wider, because a user who signs in exactly
+    // once a minute does not exist.
+    const u = data?.user;
+    if (u) {
+      identifyUser(u.id, u.email);
+      const ageMs = Date.now() - new Date(u.created_at).getTime();
+      if (ageMs < 60_000) {
+        track("sign_up_completed", { sign_up_method: "email_otp" });
+      }
     }
 
     // Where to land is decided by the server: /  redirects to /onboarding
