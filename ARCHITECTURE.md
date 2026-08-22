@@ -88,7 +88,7 @@ README › [Testing and verification](README.md#testing-and-verification).
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | brief polish + chat (default `gpt-4o-mini`) |
 | `RESEND_API_KEY` / `EMAIL_FROM` | the 7am email |
 | `NEXT_PUBLIC_APP_URL` | OAuth redirect URI, email links |
-| `GITHUB_APP_ID` / `GITHUB_APP_SLUG` | GitHub App identity; slug builds the install URL |
+| `GITHUB_APP_ID` / `GITHUB_APP_SLUG` | GitHub App identity. The slug builds only the *fallback* install screen, for a user with no installation to authorize against; the connect flow itself enters at `login/oauth/authorize` using the client id |
 | `GITHUB_APP_PRIVATE_KEY` | signs the RS256 JWT that mints installation tokens; PEM — quote it or escape the newlines, see footguns |
 | `GITHUB_APP_CLIENT_ID` / `_SECRET` | install-time OAuth. **Not** the App ID — Client ID starts `Iv`. Proves *who* finished an install; without it the callback cannot tell whose installation it was handed |
 | `NEXT_PUBLIC_MIXPANEL_TOKEN` | product analytics; public write-only token. **Unset = analytics off everywhere, silently** — which is correct for local dev, and the reason a missing value in a production build looks like Mixpanel being broken |

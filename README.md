@@ -171,12 +171,25 @@ Owner dropdown — pick the org, not yourself).
    > `GET /user/installations`. That cannot be forged without the victim's own
    > GitHub session. `state` remains as CSRF defence only.
    >
-   > It also fixes a dead end. When the app is **already installed** on the
-   > chosen account, GitHub forwards to the installation's configure page and
-   > drops `state` — which used to be an unrecoverable rejection, stranding
-   > exactly the users most likely to be trying again. With OAuth on, GitHub
-   > runs the authorization step every time, so the redirect always happens and
-   > identity no longer depends on a cookie surviving it.
+   > **The checkbox is a prerequisite, not the whole fix — the entry point is.**
+   > `lib/github/app-auth.ts` sends users to `github.com/login/oauth/authorize`,
+   > *not* `apps/<slug>/installations/new`. That matters because
+   > `installations/new` only runs an **installation**: when the app is already
+   > on the account the user picks — every returning user, and anyone who
+   > connected under a different account — GitHub diverts them to that
+   > installation's configure page, fires no callback, and leaves them on
+   > github.com with no way back. Nothing reaches the server, so there is
+   > nothing to log and nothing to show them.
+   >
+   > The authorize endpoint runs the authorization step every time, installed or
+   > not, so the redirect always happens. `prompt=consent` is set because GitHub
+   > otherwise skips the screen for an already-authorized user, which is the
+   > same dead end by another route, and `redirect_uri` is passed explicitly so
+   > localhost and production both work without reordering callbacks here.
+   >
+   > If you are tempted to point the install link back at `installations/new`
+   > because it looks more direct: that is the bug, and it presents as a Connect
+   > button that silently does nothing.
    >
    > Keep the **Setup URL** set as well. With OAuth enabled GitHub lands users
    > on the Callback URL, but the Setup URL costs nothing and covers the paths

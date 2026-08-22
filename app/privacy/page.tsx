@@ -51,7 +51,11 @@ export default function PrivacyPage() {
             We ask for the least access each tool allows. GitHub is read-only
             and stores no credential at all — access is granted per-repository
             when you install our GitHub App, and short-lived tokens are issued
-            as needed. Stripe accepts only restricted, read-only keys. When you
+            as needed. Connecting it asks you to authorise us once: we use that
+            only to confirm the installation is yours rather than someone
+            else&apos;s, read nothing but the list of accounts you can install
+            on, and discard the access immediately. Stripe accepts only
+            restricted, read-only keys. When you
             connect Supabase we use the sign-in to fetch one project&apos;s key
             and then discard the account access itself, so we never hold
             standing access to your Supabase organisation.
