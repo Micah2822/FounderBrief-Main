@@ -302,8 +302,10 @@ Hard rules:
 - Use ONLY the facts in the provided JSON. Never invent numbers, events, or causes.
 - Never characterise a change the facts do not state. The JSON gives you figures and, where they exist, comparison fields. You may report those. You may NOT decide something was "unchanged", "minimal", "significant" or "steady" — a brief once reported first-ever revenue as "unchanged from the previous day" when the previous day was zero, which was false and read as though nothing had happened.
 - If a change has no explained cause in the data, do not speculate — write "cause unknown from connected data" if a cause matters.
-- 2 to 3 sentences. Cover every source that moved; do not drop one because another is more alarming.
-- MONEY OUTRANKS EVERYTHING. If revenue moved or a customer paid, it leads the insight — never buried at the end, never omitted. A founder's FIRST revenue is the single most important event this brief can ever carry: say so plainly and put it first. After money, in order: signups, traffic, shipping.
+- 2 to 3 sentences when there is that much to say. If little happened, ONE sentence is the correct answer — a quiet day is short. Never pad to length by listing things that did not happen; enumerating absences is the single most common way this goes wrong.
+- Cover every source that moved; do not drop one because another is more alarming.
+- A source absent from the JSON is NOT CONNECTED. Never mention it — not even to say there was none. "No revenue was generated" about a founder with no Stripe account is not a finding, it is a comment on our own plumbing. Write only about the keys you were given. A key that IS present and reads zero is different: a measured zero is a real result and you should say so.
+- Order of importance: money, then signups, then traffic, then shipping.
 - Name what was shipped, don't count it. The commit_subjects field says what the work actually was: "you shipped account deletion and error alerting" is worth ten times "you shipped 5 commits". Summarise into plain outcomes; skip vague ones like "fix" or "wip" rather than listing them.
 - Describe what the data SHOWS, never what is missing. Never mention a tool being unconnected or anything limiting what we can see — that is our plumbing, not the founder's morning.
 - Write to the founder as "you". Never "we" or "our".
@@ -341,6 +343,36 @@ function isEcho(candidate: string, baseline: string): boolean {
 const MENTIONS_MISSING_DATA =
   /\b(is|isn'?t|are|aren'?t|not|no|lack of|without|missing|absence of)\b[^.]{0,40}\b(connected|analytics|tracking|telemetry|integration)\b/i;
 
+/**
+ * Vocabulary that only means something when the source behind it was collected.
+ *
+ * Keyed on the `Facts` fields themselves, so an absent source is detected
+ * structurally rather than by guessing phrasings — `MENTIONS_MISSING_DATA`
+ * caught "lack of analytics" and sailed past "No revenue was generated",
+ * because I had listed the words instead of deriving them.
+ *
+ * The distinction that matters: a key that is PRESENT and reads zero is a
+ * measured result and must stay sayable — "no revenue today" is correct and
+ * useful for a founder with Stripe connected who took nothing. Only a key that
+ * is missing entirely is off limits, because then there was never anything to
+ * measure and the sentence is about our plumbing, not their morning.
+ */
+const SOURCE_WORDS: Record<"revenue" | "product" | "traffic" | "github", RegExp> = {
+  revenue: /\b(revenue|paid|paying|charges?|mrr)\b/i,
+  product: /\b(sign[- ]?ups?|registrations?)\b/i,
+  traffic: /\b(visitors?|traffic|pageviews?)\b/i,
+  github: /\b(commits?|deploy\w*|shipp\w*|pull requests?)\b/i,
+};
+
+/** Which unconnected source the text talks about, if any. */
+function mentionsAbsentSource(text: string, facts: Facts): string | null {
+  for (const [source, pattern] of Object.entries(SOURCE_WORDS)) {
+    if (facts[source as keyof Facts]) continue;
+    if (pattern.test(text)) return source;
+  }
+  return null;
+}
+
 async function polishWithLLM(
   facts: Facts,
   fallbackInsight: string
@@ -371,10 +403,14 @@ async function polishWithLLM(
           facts.github?.uses_prs === false
             ? "IMPORTANT: this founder pushes straight to the default branch and does not use pull requests. Never treat a pull request count as a measure of their progress; commits and deployments are how they ship.\n\n"
             : ""
+        }${
+          facts.revenue
+            ? "IMPORTANT: this founder has Stripe connected, so revenue is real data. If it moved, it LEADS the insight — never buried, never omitted. A first-ever payment is the most important event this brief can carry.\n\n"
+            : ""
         }Facts for ${facts.weekday} ${facts.date}:\n${JSON.stringify(visible, null, 2)}${
           attempt === 0
             ? ""
-            : "\n\nThe previous attempt was rejected. Write it again from the facts, in your own words, leading with revenue if any moved, and say what the commit messages show was actually built."
+            : "\n\nThe previous attempt was rejected — most likely for naming a source that is not in the JSON above, or for padding with things that did not happen. Write it again using ONLY the keys present, as short as the day deserves, and say what the commit messages show was actually built."
         }`,
       });
       const text = res.output_text?.trim() ?? "";
@@ -387,6 +423,8 @@ async function polishWithLLM(
       if (!numbersAreGrounded(insight, allowed)) reasons.push("ungrounded number");
       if (isEcho(insight, fallbackInsight)) reasons.push("echoed the baseline");
       if (MENTIONS_MISSING_DATA.test(insight)) reasons.push("discussed missing data");
+      const absent = mentionsAbsentSource(insight, facts);
+      if (absent) reasons.push(`mentioned ${absent}, which is not connected`);
       // Money is the one thing that must never be dropped, and the model has
       // done it: on a first-revenue day it wrote about stalled signups and left
       // £83.40 out of the brief entirely.
