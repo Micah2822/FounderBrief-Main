@@ -90,6 +90,8 @@ README › [Testing and verification](README.md#testing-and-verification).
 | `NEXT_PUBLIC_APP_URL` | OAuth redirect URI, email links |
 | `GITHUB_APP_ID` / `GITHUB_APP_SLUG` | GitHub App identity; slug builds the install URL |
 | `GITHUB_APP_PRIVATE_KEY` | signs the RS256 JWT that mints installation tokens; PEM — quote it or escape the newlines, see footguns |
+| `GITHUB_APP_CLIENT_ID` / `_SECRET` | install-time OAuth. **Not** the App ID — Client ID starts `Iv`. Proves *who* finished an install; without it the callback cannot tell whose installation it was handed |
+| `NEXT_PUBLIC_MIXPANEL_TOKEN` | product analytics; public write-only token. **Unset = analytics off everywhere, silently** — which is correct for local dev, and the reason a missing value in a production build looks like Mixpanel being broken |
 | `SUPABASE_OAUTH_CLIENT_ID` / `_SECRET` | Management API OAuth — the **founder's** Supabase, not the app's |
 | `CRON_SECRET` | cron bearer token; **fails closed if unset** |
 | `CRON_CONCURRENCY` | users generated at once; optional, defaults to 10. Bounded by OpenAI's shared quota, not ours — see Scheduling |
@@ -1102,11 +1104,25 @@ naive parser silently truncates it to its `-----BEGIN` line, which then fails fa
 away with an opaque OpenSSL error. Both scripts share a `parseEnv()` that handles
 quoted multi-line values; copy it rather than rewriting one.
 
-**A GitHub App's Setup URL, not its Callback URL, is what returns the user after
-an install.** Leave Setup URL blank and installs end on github.com: the callback
-never runs, no row is written, and the only symptom is a Connect button that
-never changes — with nothing in the logs, because no request reached the server.
-README section 2 has the setting.
+**A GitHub App install tells you *which* installation, never *who* made it.**
+The callback receives an `installation_id` — a guessable integer — and tokens
+are minted from our own key, which works for every installation of this app. So
+a callback that trusts the id it is handed will give any signed-in account
+somebody else's repositories, and a state cookie cannot prevent it: an attacker
+starts a real flow in their own browser to obtain a valid one, then swaps the
+id. The authorisation boundary is `userOwnsInstallation()`, which checks the id
+against `GET /user/installations` using the installer's own token, obtained from
+the `code` that *"Request user authorization (OAuth) during installation"* adds.
+Do not remove that check or make it conditional.
+
+**That same setting is why installs redirect at all when the app is already
+installed.** GitHub forwards an existing installation to its configure page and
+drops `state` on the way — which, while `state` was the only gate, rejected
+precisely the users retrying. Identity now arrives by `code`, so `state` is CSRF
+defence and a *missing* one is no longer fatal; only a mismatch is. Keep the
+Setup URL populated too: with OAuth on GitHub lands users on the Callback URL,
+but it costs nothing and covers the paths OAuth does not take. README section 2
+has the settings.
 
 **The cron's three time constants are one budget, not three settings.**
 `START_DEADLINE_MS` (225s) + `USER_TIMEOUT_MS` (60s) + the alert send must stay

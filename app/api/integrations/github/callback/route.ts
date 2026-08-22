@@ -2,42 +2,57 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getInstallationToken } from "@/lib/github/app-auth";
+import {
+  exchangeUserCode,
+  getInstallationToken,
+  userOwnsInstallation,
+} from "@/lib/github/app-auth";
 import { canAddConnector } from "@/lib/billing";
 
-// Where GitHub returns after the user installs the app. Unlike the OAuth App
-// this replaced, there is no code-for-token exchange and nothing secret to
-// store: GitHub hands back an installation_id, and tokens are minted from it on
-// demand. `access_token` is deliberately left null.
+// Where GitHub returns after the user installs the app. Nothing secret is
+// stored: GitHub hands back an installation_id, tokens are minted from it on
+// demand, and `access_token` is deliberately left null.
 //
-// GitHub reaches this route via the app's **Setup URL**, not its Callback URL —
-// the Callback URL only governs the user-authorization flow, which this app does
-// not use. If Setup URL is unset, installs finish on github.com and this handler
-// never runs: the symptom is a Connect button that never changes, with nothing
-// in the logs because no request was ever made.
+// The app uses "Request user authorization (OAuth) during installation", so
+// GitHub reaches this route via the **Callback URL** (Redirect URI) carrying a
+// `code` alongside the installation_id. Keep the Setup URL pointed here too —
+// it costs nothing and covers the paths OAuth does not take.
+//
+// ── Why the code exchange is not optional ────────────────────────────────────
+//
+// An installation_id on its own is an unauthenticated claim. Tokens are minted
+// from *our* app key, which works for every installation of this app — so a
+// callback that trusts the id it is handed will give any signed-in account
+// someone else's repositories.
+//
+// A state cookie cannot close that. It proves a browser started a flow, not
+// that the installation belongs to the person finishing it, and an attacker
+// starts a real flow in their own browser to get a valid one. So `state` is
+// kept here as CSRF defence and nothing more; the actual gate is
+// userOwnsInstallation(), which asks GitHub — with the user's own token —
+// whether this installation is theirs to connect.
+//
+// That swap is also what fixes the dead-end for people who already had the app
+// installed. GitHub drops `state` when it forwards an existing installation to
+// its configure page, which used to be an unrecoverable rejection. It is now
+// merely a missing bonus check, because identity arrives by `code` instead.
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const installationId = searchParams.get("installation_id");
+  const code = searchParams.get("code");
   const state = searchParams.get("state");
   const savedState = cookies().get("gh_oauth_state")?.value;
 
-  // The state check is not a formality here. Without it, anyone could point a
-  // logged-in user's account at an installation_id they don't own — and because
-  // tokens are minted from *our* app key, that would hand the other party's
-  // repositories to whoever's account holds the row.
-  if (!state) {
-    console.error("github callback: GitHub returned no state", {
-      hasSavedState: !!savedState,
-      setupAction: searchParams.get("setup_action"),
-      hint: "Setup URL may be missing ?state passthrough, or this was a direct install from github.com",
-    });
-    return NextResponse.redirect(`${origin}/onboarding?error=github_no_state`);
-  }
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.redirect(`${origin}/login`);
 
-  if (state !== savedState) {
-    console.error("github callback: state check failed", {
-      hasSavedState: !!savedState,
-      hint: savedState ? "mismatch" : "cookie expired or the flow began in another browser",
+  // Only a positive mismatch is fatal. A *missing* state is the ordinary
+  // already-installed path (see the note above) and is covered by the ownership
+  // check below — rejecting it was the bug that stranded those users on GitHub.
+  if (state && savedState && state !== savedState) {
+    console.error("github callback: state mismatch", {
+      hint: "flow began in another tab or another browser",
     });
     return NextResponse.redirect(`${origin}/onboarding?error=github_state`);
   }
@@ -50,9 +65,33 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}/onboarding?error=github_install`);
   }
 
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.redirect(`${origin}/login`);
+  if (!code) {
+    console.error("github callback: no code", {
+      setupAction: searchParams.get("setup_action"),
+      hint: "'Request user authorization (OAuth) during installation' is off on the GitHub App, or the Redirect URI does not point here",
+    });
+    return NextResponse.redirect(`${origin}/onboarding?error=github_no_code`);
+  }
+
+  // The gate. Everything below this point trusts that the installation is
+  // genuinely this user's, so nothing may be minted or written above it.
+  try {
+    const userToken = await exchangeUserCode(code);
+    const owns = await userOwnsInstallation(userToken, installationId);
+    if (!owns) {
+      // Not necessarily an attack — someone can land here by finishing an
+      // install while signed into a different GitHub account than the one that
+      // owns it. Logged either way, because the malicious case looks identical.
+      console.error("github callback: installation does not belong to this user", {
+        installationId,
+        userId: user.id,
+      });
+      return NextResponse.redirect(`${origin}/onboarding?error=github_not_yours`);
+    }
+  } catch (e) {
+    console.error("github callback: ownership check failed", e);
+    return NextResponse.redirect(`${origin}/onboarding?error=github_verify`);
+  }
 
   // Before minting, so a refused connection never issues a token it cannot use.
   //

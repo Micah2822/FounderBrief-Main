@@ -22,6 +22,27 @@ function appId(): string {
 }
 
 /**
+ * The OAuth client pair, used only to identify *who* is finishing an install.
+ *
+ * Separate from the App ID and private key above, which authenticate the app
+ * itself. These two answer a different question — not "is this Founder Brief"
+ * but "is this person the one who owns this installation" — and there is no way
+ * to answer it from app credentials alone, because GitHub hands the callback an
+ * installation_id and nothing about the human who clicked.
+ */
+function clientId(): string {
+  const id = process.env.GITHUB_APP_CLIENT_ID;
+  if (!id) throw new Error("GITHUB_APP_CLIENT_ID is not set");
+  return id;
+}
+
+function clientSecret(): string {
+  const secret = process.env.GITHUB_APP_CLIENT_SECRET;
+  if (!secret) throw new Error("GITHUB_APP_CLIENT_SECRET is not set");
+  return secret;
+}
+
+/**
  * The PEM GitHub hands you is multi-line. Some env-var UIs keep the newlines and
  * some require them escaped, so `\n` is unescaped here; both paste cleanly.
  */
@@ -110,4 +131,81 @@ export function installUrl(state: string): string {
 
 export function newState(): string {
   return randomBytes(16).toString("hex");
+}
+
+/**
+ * Trade the `code` GitHub puts on the callback for a short-lived *user* token.
+ *
+ * Requires "Request user authorization (OAuth) during installation" on the App.
+ * With it off there is no `code`, the callback has nothing to verify against,
+ * and installs fall back to trusting whoever holds the state cookie — which is
+ * the hole this exists to close.
+ *
+ * The token is deliberately never returned to a caller that stores it. It is
+ * used once, in the callback, to answer one question, and then dropped: nothing
+ * about it reaches the database, so `integrations.access_token` stays null for
+ * GitHub and a database leak still exposes no GitHub access at all.
+ */
+export async function exchangeUserCode(code: string): Promise<string> {
+  const res = await fetch("https://github.com/login/oauth/access_token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ client_id: clientId(), client_secret: clientSecret(), code }),
+    cache: "no-store",
+  });
+
+  if (!res.ok) throw new Error(`GitHub code exchange failed (${res.status})`);
+
+  // GitHub answers 200 with an `error` field rather than an HTTP error status
+  // when the code is expired or already redeemed — so checking res.ok alone
+  // would sail past the most common failure and hand back `undefined`.
+  const body = (await res.json()) as { access_token?: string; error?: string };
+  if (body.error) throw new Error(`GitHub code exchange failed: ${body.error}`);
+  if (!body.access_token) throw new Error("GitHub code exchange returned no token");
+  return body.access_token;
+}
+
+/**
+ * Does this GitHub user actually have access to this installation?
+ *
+ * The one check that makes the callback safe. Without it, an installation_id is
+ * an unauthenticated claim: tokens are minted from *our* app key, so any signed-in
+ * account that names someone else's installation is handed their repositories.
+ * A state cookie cannot close that — an attacker starts a real flow in their own
+ * browser and gets a valid one, then swaps the id.
+ *
+ * `/user/installations` is scoped to the token's owner, so this cannot be forged
+ * without the victim's own GitHub session.
+ *
+ * Note this is deliberately *not* an ownership test on the GitHub account: a
+ * member of an org can see the org's installation, which is correct. Two
+ * colleagues at the same company should both be able to connect it.
+ */
+export async function userOwnsInstallation(
+  userToken: string,
+  installationId: string | number
+): Promise<boolean> {
+  const want = Number(installationId);
+  if (!Number.isFinite(want)) return false;
+
+  // Paginated: someone in many orgs can exceed a single page, and stopping at
+  // page one would reject a legitimate install for looking absent.
+  for (let page = 1; page <= 10; page++) {
+    const res = await fetch(`${GH}/user/installations?per_page=100&page=${page}`, {
+      headers: {
+        Authorization: `Bearer ${userToken}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`GitHub /user/installations failed (${res.status})`);
+
+    const body = (await res.json()) as { installations?: { id: number }[] };
+    const list = body.installations ?? [];
+    if (list.some((i) => i.id === want)) return true;
+    // Short page means last page; anything else would loop for no reason.
+    if (list.length < 100) return false;
+  }
+  return false;
 }

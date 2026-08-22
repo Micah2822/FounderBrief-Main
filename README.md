@@ -147,24 +147,43 @@ Owner dropdown — pick the org, not yourself).
    - Callback URL: `https://YOURAPP/api/integrations/github/callback`
      — then **Add callback URL** and also add
      `http://localhost:3000/api/integrations/github/callback`
+   - **Check "Request user authorization (OAuth) during installation"** — see
+     the note below. Without it the connect flow is both broken and unsafe.
    - **Post installation → Setup URL:**
      `https://YOURAPP/api/integrations/github/callback`
    - **Post installation → check "Redirect on update"**
-   - **Uncheck** "Expire user authorization tokens" — unused, we never issue
-     user tokens.
+   - **Uncheck** "Expire user authorization tokens" — the user token is
+     redeemed once, in the callback, and dropped before the response is sent, so
+     expiry and refresh tokens have nothing to act on.
    - Webhook → **uncheck Active**. Nothing here listens for webhooks.
 
-   > **The Setup URL is the one that actually matters, and it is easy to skip.**
-   > For a GitHub App the Callback URL governs the *user-authorization* flow,
-   > which this app doesn't use. The redirect after an **installation** is the
-   > Setup URL. Leave it blank and installs simply end on github.com: our
-   > handler never runs, no row is written, and onboarding still shows "Connect
-   > GitHub" while GitHub shows "Configure" — with nothing in your logs, because
-   > no request ever reached your server. "Redirect on update" is what brings a
-   > user back after they change which repos the app can see.
+   > **Why user authorization is required, not optional.**
+   > GitHub tells the callback *which installation* was created. It does not say
+   > *who created it* — and an installation id is a guessable integer. Because
+   > tokens are minted from the app's own key, which works for every
+   > installation of this app, a callback that trusts the id it is handed will
+   > hand any signed-in account somebody else's repositories.
    >
-   > Setup URL takes a single value, so in development either point it at
-   > `http://localhost:3000/...` temporarily or test against production.
+   > A state cookie cannot close that: an attacker starts a genuine flow in
+   > their own browser to obtain a valid one, then swaps the id. Ticking this
+   > box adds a `code` identifying the human, which
+   > `userOwnsInstallation()` trades for a user token and checks against
+   > `GET /user/installations`. That cannot be forged without the victim's own
+   > GitHub session. `state` remains as CSRF defence only.
+   >
+   > It also fixes a dead end. When the app is **already installed** on the
+   > chosen account, GitHub forwards to the installation's configure page and
+   > drops `state` — which used to be an unrecoverable rejection, stranding
+   > exactly the users most likely to be trying again. With OAuth on, GitHub
+   > runs the authorization step every time, so the redirect always happens and
+   > identity no longer depends on a cookie surviving it.
+   >
+   > Keep the **Setup URL** set as well. With OAuth enabled GitHub lands users
+   > on the Callback URL, but the Setup URL costs nothing and covers the paths
+   > OAuth does not take. It accepts a single value, so in development either
+   > point it at `http://localhost:3000/...` temporarily or test against
+   > production. "Redirect on update" brings a user back after they change which
+   > repos the app can see.
 2. **Repository permissions** — read-only, and nothing else:
 
    | Permission | Access |
@@ -181,10 +200,20 @@ Owner dropdown — pick the org, not yourself).
    only your own org can connect and no customer can onboard.
 4. Create the app, then **Generate a private key**. A `.pem` downloads — this is
    the only copy, GitHub does not show it again.
-5. Fill `.env.local`:
+5. On the same settings page, **Generate a new client secret** and copy it
+   immediately — GitHub shows it once. The Client ID above it needs no
+   generating.
+6. Fill `.env.local`:
    - `GITHUB_APP_ID` — the App ID on the app's settings page
    - `GITHUB_APP_SLUG` — the last path segment of the app's public page
      (`github.com/apps/<slug>`), which is the name lowercased and hyphenated
+   - `GITHUB_APP_CLIENT_ID` — **not the App ID.** A string beginning `Iv`,
+     listed separately further down the same page. App ID and private key
+     authenticate the *app*; Client ID and secret identify the *person*
+     finishing an install. If the value you paste is all digits, it is the App
+     ID and it is in the wrong slot.
+   - `GITHUB_APP_CLIENT_SECRET` — from step 5. A real secret; treat it like the
+     private key.
    - `GITHUB_APP_PRIVATE_KEY` — the `.pem` contents, **on one line, quoted**:
 
      ```bash
@@ -201,7 +230,7 @@ Owner dropdown — pick the org, not yourself).
      until signing fails. Use the single-line form: it behaves identically in
      `.env.local` and in Vercel's env field.
 
-6. Check it before going further — this validates the ID and key *together* and
+7. Check it before going further — this validates the ID and key *together* and
    prints nothing secret:
 
    ```bash
@@ -776,8 +805,15 @@ little of that as possible.
 
 - **GitHub** — read-only permissions, per-repository, and **no credential
   stored**: the row holds an `installation_id` and tokens are minted per run.
-  Never migrate back to an OAuth App; `repo` is the only scope that can read
-  private repositories and it carries write access with it.
+  The user token from the install-time authorization is redeemed once, to
+  confirm the installation belongs to the person connecting it, and discarded
+  before the response is sent — `access_token` stays null. That check is the
+  authorisation boundary for this connector and must never be removed: an
+  installation id is a guessable integer, and tokens are minted from our own key
+  for *any* installation, so without it a signed-in account can name a
+  stranger's installation and read their repositories. Never migrate back to an
+  OAuth App; `repo` is the only scope that can read private repositories and it
+  carries write access with it.
 - **Supabase** — the OAuth flow's management token is used once and discarded,
   so we hold one project's key rather than standing access to an organisation.
   Keeping that token "to make refreshes easier" would undo the whole point.

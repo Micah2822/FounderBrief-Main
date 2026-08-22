@@ -15,8 +15,12 @@ const CONNECT_ERRORS: Record<string, string> = {
     "GitHub sent you back, but the security check didn't match. This usually means the attempt was started in another tab or took too long. Try connecting again.",
   github_install:
     "The install didn't finish — GitHub didn't tell us which installation to use. Try again and complete the install on GitHub's screen.",
-  github_no_state:
-    "GitHub sent you back without the security token we issued. If you started this from GitHub's own site, start from the Connect button here instead. If you're the operator: the GitHub App's Setup URL needs to be set (see README section 2).",
+  github_no_code:
+    "GitHub sent you back without confirming who you are, so we couldn't check the install was yours. If you're the operator: the GitHub App needs \u201cRequest user authorization (OAuth) during installation\u201d turned on, with its Redirect URI pointing at this app.",
+  github_not_yours:
+    "That installation belongs to a different GitHub account. If you have more than one, check which is signed in on github.com, then connect again.",
+  github_verify:
+    "We couldn't confirm the install with GitHub. Try connecting again \u2014 if it keeps happening, GitHub may be having trouble.",
   github_token:
     "GitHub wouldn't issue a token for that installation. Try connecting again — if it keeps happening, the GitHub App's ID or private key is likely wrong.",
   github_save:
