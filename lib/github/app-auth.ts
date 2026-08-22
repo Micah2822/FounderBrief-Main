@@ -120,8 +120,45 @@ export async function getInstallationToken(installationId: string | number): Pro
   return body.token;
 }
 
-/** Where we send the user to install the app onto their repositories. */
-export function installUrl(state: string): string {
+/**
+ * Where we send the user to connect GitHub.
+ *
+ * This is the **OAuth authorize** endpoint, not `apps/<slug>/installations/new`,
+ * and the difference is the whole reason the connect flow works at all.
+ *
+ * `installations/new` only runs an *installation*. If the app is already on the
+ * account the user picks — which is every returning user, and anyone who
+ * connected under a different account — GitHub forwards them to that
+ * installation's configure page instead, fires no callback, and leaves them on
+ * github.com with no way back. No request reaches us, so there is nothing to
+ * log and nothing to show them.
+ *
+ * The authorize endpoint runs the user-authorization step *every* time, so the
+ * redirect always happens. Two parameters matter:
+ *
+ *  - `prompt=consent` forces the consent screen even for someone who has
+ *    authorized before. Without it GitHub may skip straight through, and a
+ *    skipped screen on an already-authorized account is the same dead end.
+ *  - `redirect_uri` is sent explicitly rather than letting GitHub fall back to
+ *    the first registered callback. That is what makes localhost and production
+ *    both work without reordering URLs in the app's settings — it must still
+ *    match one of the registered callbacks exactly.
+ *
+ * `installations/new` is still reachable via `bareInstallUrl()` below, for the
+ * one case this endpoint cannot serve: a user who has never installed the app
+ * anywhere and therefore has no installation to authorize against.
+ */
+export function installUrl(state: string, redirectUri: string): string {
+  const url = new URL("https://github.com/login/oauth/authorize");
+  url.searchParams.set("client_id", clientId());
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("state", state);
+  url.searchParams.set("prompt", "consent");
+  return url.toString();
+}
+
+/** GitHub's install screen — where repositories are chosen. */
+export function bareInstallUrl(state: string): string {
   const slug = process.env.GITHUB_APP_SLUG;
   if (!slug) throw new Error("GITHUB_APP_SLUG is not set");
   const url = new URL(`https://github.com/apps/${slug}/installations/new`);
@@ -181,13 +218,8 @@ export async function exchangeUserCode(code: string): Promise<string> {
  * member of an org can see the org's installation, which is correct. Two
  * colleagues at the same company should both be able to connect it.
  */
-export async function userOwnsInstallation(
-  userToken: string,
-  installationId: string | number
-): Promise<boolean> {
-  const want = Number(installationId);
-  if (!Number.isFinite(want)) return false;
-
+export async function userInstallationIds(userToken: string): Promise<number[]> {
+  const ids: number[] = [];
   // Paginated: someone in many orgs can exceed a single page, and stopping at
   // page one would reject a legitimate install for looking absent.
   for (let page = 1; page <= 10; page++) {
@@ -203,9 +235,14 @@ export async function userOwnsInstallation(
 
     const body = (await res.json()) as { installations?: { id: number }[] };
     const list = body.installations ?? [];
-    if (list.some((i) => i.id === want)) return true;
+    for (const i of list) ids.push(i.id);
     // Short page means last page; anything else would loop for no reason.
-    if (list.length < 100) return false;
+    if (list.length < 100) break;
   }
-  return false;
+  return ids;
+}
+
+export function userOwnsInstallation(ids: number[], installationId: string | number): boolean {
+  const want = Number(installationId);
+  return Number.isFinite(want) && ids.includes(want);
 }

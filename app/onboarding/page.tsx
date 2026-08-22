@@ -13,10 +13,10 @@ export const dynamic = "force-dynamic";
 const CONNECT_ERRORS: Record<string, string> = {
   github_state:
     "GitHub sent you back, but the security check didn't match. This usually means the attempt was started in another tab or took too long. Try connecting again.",
-  github_install:
-    "The install didn't finish — GitHub didn't tell us which installation to use. Try again and complete the install on GitHub's screen.",
   github_no_code:
     "GitHub sent you back without confirming who you are, so we couldn't check the install was yours. If you're the operator: the GitHub App needs \u201cRequest user authorization (OAuth) during installation\u201d turned on, with its Redirect URI pointing at this app.",
+  github_multiple:
+    "You have this app installed on more than one GitHub account, and GitHub didn't say which one you meant. Open the app on GitHub, choose Configure on the account you want, and connect again from there.",
   github_not_yours:
     "That installation belongs to a different GitHub account. If you have more than one, check which is signed in on github.com, then connect again.",
   github_verify:

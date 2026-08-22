@@ -3,11 +3,15 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  bareInstallUrl,
   exchangeUserCode,
   getInstallationToken,
+  newState,
+  userInstallationIds,
   userOwnsInstallation,
 } from "@/lib/github/app-auth";
 import { canAddConnector } from "@/lib/billing";
+import { SECURE_COOKIES } from "@/lib/cookies";
 
 // Where GitHub returns after the user installs the app. Nothing secret is
 // stored: GitHub hands back an installation_id, tokens are minted from it on
@@ -38,7 +42,7 @@ import { canAddConnector } from "@/lib/billing";
 // merely a missing bonus check, because identity arrives by `code` instead.
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
-  const installationId = searchParams.get("installation_id");
+  const queryInstallationId = searchParams.get("installation_id");
   const code = searchParams.get("code");
   const state = searchParams.get("state");
   const savedState = cookies().get("gh_oauth_state")?.value;
@@ -57,14 +61,6 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}/onboarding?error=github_state`);
   }
 
-  if (!installationId) {
-    // Reachable if the user backs out of GitHub's install screen.
-    console.error("github callback: no installation_id", {
-      setupAction: searchParams.get("setup_action"),
-    });
-    return NextResponse.redirect(`${origin}/onboarding?error=github_install`);
-  }
-
   if (!code) {
     console.error("github callback: no code", {
       setupAction: searchParams.get("setup_action"),
@@ -73,20 +69,60 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}/onboarding?error=github_no_code`);
   }
 
-  // The gate. Everything below this point trusts that the installation is
-  // genuinely this user's, so nothing may be minted or written above it.
+  // ── The gate ────────────────────────────────────────────────────────────────
+  //
+  // Everything below trusts that the installation is genuinely this user's, so
+  // nothing may be minted or written above it.
+  //
+  // The id is resolved *from the user's own token* rather than taken from the
+  // query, because the authorize endpoint does not reliably send one — and
+  // because deriving it is strictly safer than verifying it: a value that came
+  // out of this user's installation list cannot be someone else's by
+  // construction. When GitHub does send an id, it is honoured only after being
+  // checked against that same list.
+  let installationId: string;
   try {
     const userToken = await exchangeUserCode(code);
-    const owns = await userOwnsInstallation(userToken, installationId);
-    if (!owns) {
-      // Not necessarily an attack — someone can land here by finishing an
-      // install while signed into a different GitHub account than the one that
-      // owns it. Logged either way, because the malicious case looks identical.
-      console.error("github callback: installation does not belong to this user", {
-        installationId,
+    const ids = await userInstallationIds(userToken);
+
+    if (queryInstallationId) {
+      if (!userOwnsInstallation(ids, queryInstallationId)) {
+        // Not necessarily an attack — someone can land here by finishing an
+        // install while signed into a different GitHub account than the one
+        // that owns it. Logged either way: the malicious case looks identical.
+        console.error("github callback: installation does not belong to this user", {
+          queryInstallationId,
+          userId: user.id,
+        });
+        return NextResponse.redirect(`${origin}/onboarding?error=github_not_yours`);
+      }
+      installationId = String(queryInstallationId);
+    } else if (ids.length === 1) {
+      installationId = String(ids[0]);
+    } else if (ids.length === 0) {
+      // Authorized us, but has not installed the app on any account yet. Send
+      // them to the install screen, which is the one thing the authorize
+      // endpoint cannot do. A fresh state is issued and stored rather than the
+      // cookie simply being dropped, so the return trip still carries a CSRF
+      // check instead of quietly having none.
+      const nextState = newState();
+      const res = NextResponse.redirect(bareInstallUrl(nextState));
+      res.cookies.set("gh_oauth_state", nextState, {
+        httpOnly: true,
+        secure: SECURE_COOKIES,
+        maxAge: 1800,
+        path: "/",
+        sameSite: "lax",
+      });
+      return res;
+    } else {
+      // Several installations and GitHub named none. Guessing here would be
+      // guessing which account's repositories to expose, so it asks instead.
+      console.error("github callback: multiple installations, none specified", {
+        count: ids.length,
         userId: user.id,
       });
-      return NextResponse.redirect(`${origin}/onboarding?error=github_not_yours`);
+      return NextResponse.redirect(`${origin}/onboarding?error=github_multiple`);
     }
   } catch (e) {
     console.error("github callback: ownership check failed", e);
